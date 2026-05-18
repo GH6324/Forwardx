@@ -26,6 +26,10 @@ jobs:
           node-version: "22"
 
       - name: Build Linux Agent binaries
+        env:
+          FORWARDX_FXP_RELEASE_DIR: ${{ secrets.FORWARDX_FXP_RELEASE_DIR }}
+          FORWARDX_FXP_AMD64_B64: ${{ secrets.FORWARDX_FXP_AMD64_B64 }}
+          FORWARDX_FXP_ARM64_B64: ${{ secrets.FORWARDX_FXP_ARM64_B64 }}
         run: bash scripts/build-agent-release.sh "${GITHUB_REF_NAME}"
 
       - name: Upload Agent binaries to GitHub Release
@@ -34,4 +38,7 @@ jobs:
           files: |
             dist/agent/forwardx-agent-linux-amd64
             dist/agent/forwardx-agent-linux-arm64
+            dist/agent/forwardx-fxp-linux-amd64
+            dist/agent/forwardx-fxp-linux-arm64
             dist/agent/SHA256SUMS
+          fail_on_unmatched_files: false

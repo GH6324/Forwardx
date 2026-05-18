@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-var Version = "2.2.36"
+var Version = "2.2.44"
 var upgradeStarted int32
 var fxpMu sync.Mutex
 var fxpServers = map[string]*fxpProcess{}
@@ -353,6 +353,7 @@ func runAgentEventStream(cfg Config) error {
 
 func handleAction(cfg Config, a action) {
 	ok := true
+	actionMessage := &actionMessage{}
 	logf("action start op=%s statusType=%s rule=%d tunnel=%d forwardType=%s port=%d protocol=%s", a.Op, a.StatusType, a.RuleID, a.TunnelID, a.ForwardType, a.SourcePort, a.Protocol)
 	if a.Op == "apply" {
 		if a.Unit != "" && a.ServiceName != "" {
@@ -365,7 +366,7 @@ func handleAction(cfg Config, a action) {
 			ok = runShell(cmd) && ok
 		}
 		if a.Fxp != nil {
-			fxpOK := startFXP(*a.Fxp)
+			fxpOK := startFXP(*a.Fxp, actionMessage)
 			logf("action fxp role=%s tunnel=%d rule=%d listen=%d protocol=%s ok=%v", a.Fxp.Role, a.Fxp.TunnelID, a.Fxp.RuleID, a.Fxp.ListenPort, a.Fxp.Protocol, fxpOK)
 			ok = fxpOK && ok
 		}
@@ -380,7 +381,8 @@ func handleAction(cfg Config, a action) {
 		removeState(a.SourcePort)
 	}
 	running := ok && a.Op == "apply"
-	payload := map[string]any{"ruleId": a.RuleID, "tunnelId": a.TunnelID, "statusType": a.StatusType, "isRunning": running}
+	message := actionMessage.get()
+	payload := map[string]any{"ruleId": a.RuleID, "tunnelId": a.TunnelID, "statusType": a.StatusType, "isRunning": running, "message": message}
 	var out map[string]any
 	if err := post(cfg, "/api/agent/rule-status", payload, &out); err != nil {
 		logf("rule-status report failed statusType=%s rule=%d tunnel=%d running=%v: %v", a.StatusType, a.RuleID, a.TunnelID, running, err)
@@ -712,6 +714,41 @@ type fxpProcess struct {
 	configPath string
 }
 
+type actionMessage struct {
+	mu  sync.Mutex
+	msg string
+}
+
+func (m *actionMessage) set(format string, args ...any) {
+	if m == nil {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	m.mu.Lock()
+	m.msg = msg
+	m.mu.Unlock()
+	logf("%s", msg)
+}
+
+func (m *actionMessage) remember(format string, args ...any) {
+	if m == nil {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	m.mu.Lock()
+	m.msg = msg
+	m.mu.Unlock()
+}
+
+func (m *actionMessage) get() string {
+	if m == nil {
+		return ""
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.msg
+}
+
 func fxpServerID(spec fxpSpec) string {
 	return spec.Role + ":" + strconv.Itoa(spec.TunnelID) + ":" + strconv.Itoa(spec.RuleID) + ":" + strconv.Itoa(spec.ListenPort)
 }
@@ -736,9 +773,9 @@ func fxpServerSignature(spec fxpSpec) string {
 	}, "|")
 }
 
-func startFXP(spec fxpSpec) bool {
+func startFXP(spec fxpSpec, actionMessage *actionMessage) bool {
 	if spec.Key == "" || spec.ListenPort <= 0 {
-		logf("fxp invalid config role=%s tunnel=%d rule=%d port=%d", spec.Role, spec.TunnelID, spec.RuleID, spec.ListenPort)
+		actionMessage.set("fxp invalid config role=%s tunnel=%d rule=%d port=%d", spec.Role, spec.TunnelID, spec.RuleID, spec.ListenPort)
 		return false
 	}
 	runtimePath, err := exec.LookPath("forwardx-fxp")
@@ -752,7 +789,7 @@ func startFXP(spec fxpSpec) bool {
 		}
 	}
 	if err != nil || runtimePath == "" {
-		logf("fxp runtime missing: install /usr/local/bin/forwardx-fxp to use custom encrypted tunnels")
+		actionMessage.set("fxp runtime missing: install /usr/local/bin/forwardx-fxp to use custom encrypted tunnels")
 		return false
 	}
 
@@ -769,26 +806,26 @@ func startFXP(spec fxpSpec) bool {
 	stopFXP(spec)
 
 	if err := os.MkdirAll("/run/forwardx-agent", 0700); err != nil {
-		logf("fxp create runtime dir failed: %v", err)
+		actionMessage.set("fxp create runtime dir failed: %v", err)
 		return false
 	}
 	configPath := fmt.Sprintf("/run/forwardx-agent/fxp-%s-%d-%d-%d.json", spec.Role, spec.TunnelID, spec.RuleID, spec.ListenPort)
 	cfgBytes, err := json.Marshal(spec)
 	if err != nil {
-		logf("fxp marshal config failed: %v", err)
+		actionMessage.set("fxp marshal config failed: %v", err)
 		return false
 	}
 	if err := os.WriteFile(configPath, cfgBytes, 0600); err != nil {
-		logf("fxp write config failed: %v", err)
+		actionMessage.set("fxp write config failed: %v", err)
 		return false
 	}
 
 	cmd := exec.Command(runtimePath, "-config", configPath)
-	cmd.Stdout = fxpLogWriter{}
-	cmd.Stderr = fxpLogWriter{}
+	cmd.Stdout = fxpLogWriter{message: actionMessage}
+	cmd.Stderr = fxpLogWriter{message: actionMessage}
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(configPath)
-		logf("fxp runtime start failed: %v", err)
+		actionMessage.set("fxp runtime start failed: %v", err)
 		return false
 	}
 
@@ -832,12 +869,17 @@ func stopFXP(spec fxpSpec) {
 	}
 }
 
-type fxpLogWriter struct{}
+type fxpLogWriter struct {
+	message *actionMessage
+}
 
-func (fxpLogWriter) Write(p []byte) (int, error) {
+func (w fxpLogWriter) Write(p []byte) (int, error) {
 	msg := strings.TrimSpace(string(p))
 	if msg != "" {
 		logf("fxp runtime: %s", msg)
+		if w.message != nil {
+			w.message.remember("fxp runtime: %s", msg)
+		}
 	}
 	return len(p), nil
 }

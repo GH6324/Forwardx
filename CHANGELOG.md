@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.44] - 2026-05-19
+
+### Changed
+
+- Bumped panel and Agent target versions to 2.2.44.
+- Agent now reports ForwardX tunnel startup errors back to the panel logs.
+- Release workflow can attach closed ForwardX tunnel runtime assets from CI secrets without committing runtime source.
+
 ## [2.2.43] - 2026-05-19
 
 ### Added

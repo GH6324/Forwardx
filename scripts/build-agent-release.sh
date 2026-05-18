@@ -35,9 +35,26 @@ if [ -n "${FORWARDX_FXP_RELEASE_DIR:-}" ]; then
       echo "[agent] bundled closed runtime -> forwardx-fxp-linux-$arch"
     fi
   done
+else
+  echo "[agent] FORWARDX_FXP_RELEASE_DIR not set; custom tunnel runtime assets will not be bundled"
 fi
 
-sha256sum "$OUT_DIR"/forwardx-agent-linux-* > "$OUT_DIR"/SHA256SUMS
+for arch in amd64 arm64; do
+  var="FORWARDX_FXP_${arch^^}_B64"
+  b64="${!var:-}"
+  if [ -n "$b64" ]; then
+    out="$OUT_DIR/forwardx-fxp-linux-$arch"
+    printf '%s' "$b64" | base64 -d > "$out"
+    chmod 0755 "$out"
+    echo "[agent] bundled closed runtime from secret -> forwardx-fxp-linux-$arch"
+  fi
+done
+
+artifacts=("$OUT_DIR"/forwardx-agent-linux-*)
+if compgen -G "$OUT_DIR/forwardx-fxp-linux-*" >/dev/null; then
+  artifacts+=("$OUT_DIR"/forwardx-fxp-linux-*)
+fi
+sha256sum "${artifacts[@]}" > "$OUT_DIR"/SHA256SUMS
 
 echo "[agent] release artifacts:"
 ls -lh "$OUT_DIR"

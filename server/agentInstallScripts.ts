@@ -1138,6 +1138,8 @@ export function generateFullInstallScript(panelUrl: string, token: string): stri
     '        echo "[信息] ForwardX tunnel runtime installed: $FXP_URL"',
     '      else',
     '        rm -f /usr/local/bin/forwardx-fxp.tmp',
+    '        echo "[WARN] forwardx-fxp runtime asset is missing; custom encrypted tunnels will be unavailable"',
+    '        echo "[HINT] Publish forwardx-fxp-linux-${GO_ARCH} in the Release or install it to /usr/local/bin/forwardx-fxp"',
     '        echo "[警告] ForwardX tunnel runtime not found; custom encrypted tunnels will stay unavailable"',
     '      fi',
     '      return 0',

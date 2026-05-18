@@ -19,6 +19,8 @@ agentRouter.post("/api/agent/rule-status", async (req: Request, res: Response) =
     }
 
     const { ruleId, tunnelId, statusType, isRunning } = req.body;
+    const rawMessage = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    const message = rawMessage.length > 300 ? `${rawMessage.slice(0, 300)}...` : rawMessage;
     if (statusType === "tunnel") {
       if (typeof tunnelId !== "number") {
         res.status(400).json({ error: "tunnelId is required" });
@@ -30,7 +32,10 @@ agentRouter.post("/api/agent/rule-status", async (req: Request, res: Response) =
         return;
       }
       await db.updateTunnelRunningStatus(tunnelId, !!isRunning);
-      appendPanelLog("info", `[Tunnel] status tunnel=${tunnelId} host=${host.id} running=${!!isRunning}`);
+      appendPanelLog(
+        !!isRunning ? "info" : "warn",
+        `[Tunnel] status tunnel=${tunnelId} host=${host.id} running=${!!isRunning}${message ? ` message=${message}` : ""}`,
+      );
       res.json({ success: true });
       return;
     }
@@ -40,7 +45,10 @@ agentRouter.post("/api/agent/rule-status", async (req: Request, res: Response) =
     }
 
     await db.updateRuleRunningStatus(ruleId, !!isRunning);
-    appendPanelLog("info", `[Rule] status rule=${ruleId} host=${host.id} running=${!!isRunning}`);
+    appendPanelLog(
+      !!isRunning ? "info" : "warn",
+      `[Rule] status rule=${ruleId} host=${host.id} running=${!!isRunning}${message ? ` message=${message}` : ""}`,
+    );
     res.json({ success: true });
   } catch (error) {
     console.error("[Agent Rule Status] Error:", error);
