@@ -21,6 +21,7 @@ import Billing from "./pages/Billing";
 import Wallet from "./pages/Wallet";
 import Announcements from "./pages/Announcements";
 import Setup from "./pages/Setup";
+import EmailSettings from "./pages/EmailSettings";
 
 function AdminRoute({ component: Component }: { component: ComponentType }) {
   const { user, loading } = useAuth();
@@ -40,6 +41,7 @@ function Router() {
       <Route path="/rules" component={Rules} />
       <Route path="/tunnels">{() => <AdminRoute component={Tunnels} />}</Route>
       <Route path="/users">{() => <AdminRoute component={Users} />}</Route>
+      <Route path="/email-settings">{() => <AdminRoute component={EmailSettings} />}</Route>
       <Route path="/payments">{() => <AdminRoute component={Payments} />}</Route>
       <Route path="/billing">{() => <AdminRoute component={Billing} />}</Route>
       <Route path="/plans">{() => <AdminRoute component={Plans} />}</Route>
@@ -62,7 +64,7 @@ function SetupGate() {
 
   if (setup.isLoading) return null;
 
-  const ready = !!setup.data?.databaseConnected && !!setup.data?.schemaReady && !!setup.data?.hasAdmin;
+  const ready = !!setup.data?.setupComplete;
   if (!ready && location !== "/setup") return <Redirect to="/setup" />;
   if (ready && location === "/setup") return <Redirect to="/login" />;
   return <Router />;

@@ -80,3 +80,21 @@ export async function createInitialAdmin(input: { email: string; password: strin
   });
   return id;
 }
+
+export async function updateInitialAdmin(input: { email: string; password?: string; name?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const admin = (await db.select().from(users).where(eq(users.role, "admin")).limit(1))[0];
+  if (!admin) throw new Error("管理员账户不存在");
+  const payload: Record<string, unknown> = {
+    username: input.email,
+    email: input.email,
+    name: input.name?.trim() || input.email,
+    updatedAt: nowDate(),
+  };
+  if (input.password?.trim()) {
+    payload.password = hashPassword(input.password);
+  }
+  await db.update(users).set(payload).where(eq(users.id, admin.id));
+  return admin.id;
+}

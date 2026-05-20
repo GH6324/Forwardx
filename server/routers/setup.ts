@@ -1,22 +1,24 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
-import { ensureDatabaseSchema } from "../dbSchema";
+import { MIGRATION_TABLES, ensureDatabaseSchema } from "../dbSchema";
 import {
   DatabaseConfig,
   DatabaseDialectMismatchError,
   closeDatabase,
   defaultSqlitePath,
+  executeRaw,
   getConfiguredDatabaseKind,
   getDatabaseKind,
   getSchemaDialect,
   maskDatabaseConfig,
+  queryRaw,
   readDatabaseConfig,
   reconnectDatabase,
   testDatabaseConnection,
   writeDatabaseConfig,
 } from "../dbRuntime";
-import { createInitialAdmin, hasAdminUser } from "../db";
-import { setSettings } from "../repositories/settingsRepository";
+import { createInitialAdmin, hasAdminUser, updateInitialAdmin } from "../db";
+import { getAllSettings, setSettings } from "../repositories/settingsRepository";
 import { getMigrationJob, startPanelMigration } from "../migration";
 
 const mysqlConfigInput = z.object({
@@ -48,6 +50,10 @@ async function setupStatus() {
       activeDatabaseType: getDatabaseKind(),
       schemaReady: false,
       hasAdmin: false,
+      hasExistingData: false,
+      existingData: null,
+      setupDataChoice: null,
+      setupComplete: false,
       config: null,
       needsRestart: false,
       defaultSqlitePath: defaultSqlitePath(),
@@ -59,13 +65,21 @@ async function setupStatus() {
     const db = await reconnectDatabase();
     if (!db) throw new Error("数据库未连接");
     await ensureDatabaseSchema();
+    const hasAdmin = await hasAdminUser();
+    const settings = await getAllSettings();
+    const setupDataChoice = settings.setupDataChoice || null;
+    const existingData = await getExistingDataSummary();
     return {
       databaseConfigured: true,
       databaseConnected: true,
       databaseType: config.type,
       activeDatabaseType: getDatabaseKind(),
       schemaReady: true,
-      hasAdmin: await hasAdminUser(),
+      hasAdmin,
+      hasExistingData: existingData.hasExistingData,
+      existingData,
+      setupDataChoice,
+      setupComplete: hasAdmin && (!existingData.hasExistingData || setupDataChoice === "use-existing" || setupDataChoice === "new-panel"),
       config: maskDatabaseConfig(config),
       needsRestart: false,
       defaultSqlitePath: defaultSqlitePath(),
@@ -80,12 +94,64 @@ async function setupStatus() {
       activeDatabaseType: getDatabaseKind(),
       schemaReady: false,
       hasAdmin: false,
+      hasExistingData: false,
+      existingData: null,
+      setupDataChoice: null,
+      setupComplete: false,
       config: maskDatabaseConfig(config),
       needsRestart,
       defaultSqlitePath: defaultSqlitePath(),
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function quote(name: string) {
+  return getDatabaseKind() === "sqlite" ? `"${name}"` : `\`${name}\``;
+}
+
+async function countTableRows(table: string) {
+  try {
+    const rows = await queryRaw<{ count: number }>(`SELECT COUNT(*) as count FROM ${quote(table)}`);
+    return Number(rows[0]?.count || 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function getExistingDataSummary() {
+  const counts: Record<string, number> = {};
+  for (const table of MIGRATION_TABLES) {
+    counts[table] = await countTableRows(table);
+  }
+  const userCount = counts.users || 0;
+  const hostCount = counts.hosts || 0;
+  const ruleCount = counts.forward_rules || 0;
+  const tunnelCount = counts.tunnels || 0;
+  const hasExistingData = userCount > 0 || hostCount > 0 || ruleCount > 0 || tunnelCount > 0;
+  return { hasExistingData, userCount, hostCount, ruleCount, tunnelCount, counts };
+}
+
+async function clearExistingPanelData() {
+  await reconnectDatabase();
+  await ensureDatabaseSchema();
+  const settings = await getAllSettings();
+  for (const table of [...MIGRATION_TABLES].reverse()) {
+    await executeRaw(`DELETE FROM ${quote(table)}`);
+  }
+  await setSettings({
+    storeEnabled: settings.storeEnabled ?? "false",
+    homepageEnabled: settings.homepageEnabled ?? "true",
+    redemptionEnabled: settings.redemptionEnabled ?? "true",
+    discountEnabled: settings.discountEnabled ?? "true",
+    databaseConfigured: "true",
+    databaseType: getDatabaseKind() || "",
+    mysqlConfigured: getDatabaseKind() === "mysql" ? "true" : "false",
+    mysqlHost: settings.mysqlHost ?? "",
+    mysqlDatabase: settings.mysqlDatabase ?? "",
+    sqlitePath: settings.sqlitePath ?? "",
+    setupDataChoice: "new-panel",
+  });
 }
 
 async function saveDatabase(input: DatabaseConfig) {
@@ -144,8 +210,7 @@ export const setupRouter = router({
   startMigration: publicProcedure
     .input(z.object({
       oldPanelUrl: z.string().trim().min(1, "请输入旧面板地址"),
-      username: z.string().trim().min(1, "请输入旧面板管理员账户"),
-      password: z.string().min(1, "请输入旧面板管理员密码"),
+      migrationCode: z.string().trim().min(1, "请输入旧面板迁移码"),
       targetPanelUrl: z.string().trim().min(1, "请输入新面板访问地址"),
     }))
     .mutation(async ({ input }) => {
@@ -159,6 +224,18 @@ export const setupRouter = router({
     .input(z.object({ jobId: z.string().min(1) }))
     .query(({ input }) => getMigrationJob(input.jobId)),
 
+  useExistingData: publicProcedure.mutation(async () => {
+    await reconnectDatabase();
+    await ensureDatabaseSchema();
+    await setSettings({ setupDataChoice: "use-existing" });
+    return setupStatus();
+  }),
+
+  resetExistingData: publicProcedure.mutation(async () => {
+    await clearExistingPanelData();
+    return setupStatus();
+  }),
+
   createAdmin: publicProcedure
     .input(z.object({
       email: z.string().email("请输入有效邮箱地址").max(320),
@@ -169,6 +246,25 @@ export const setupRouter = router({
       await reconnectDatabase();
       await ensureDatabaseSchema();
       const id = await createInitialAdmin(input);
+      await setSettings({ setupDataChoice: "new-panel" });
+      return { id, success: true };
+    }),
+
+  updateAdmin: publicProcedure
+    .input(z.object({
+      email: z.string().email("请输入有效邮箱地址").max(320),
+      password: z.string().max(128).optional(),
+      name: z.string().trim().max(64).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      await reconnectDatabase();
+      await ensureDatabaseSchema();
+      if (input.password && input.password.length < 8) {
+        throw new Error("密码至少 8 位");
+      }
+      const id = await updateInitialAdmin(input);
+      const existingData = await getExistingDataSummary();
+      await setSettings({ setupDataChoice: existingData.hasExistingData ? "use-existing" : "new-panel" });
       return { id, success: true };
     }),
 });

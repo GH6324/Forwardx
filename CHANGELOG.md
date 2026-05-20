@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.47] - 2026-05-20
+
+### Added
+
+- Added the first-run setup wizard with database setup, existing-data handling, migration-code import, and administrator setup steps.
+- Added public homepage support with login/register entry points and an admin toggle.
+- Added dedicated email settings for SMTP, registration verification, expiry reminders, and traffic reminders.
+- Added GOST tunnel configuration options for WSS, TLS, TCP, MTLS, MWSS, and MTCP.
+
+### Changed
+
+- Panel migration now uses one-time migration codes, imports data into the new panel, then confirms takeover with the old panel.
+- After migration takeover, the old panel pushes Agents to the new panel address and clears business data while retaining administrator accounts.
+- Bumped panel version to 2.2.47. Agent version remains 2.2.45.
+
+### Fixed
+
+- Fixed user-management layout overflow on narrow browser windows.
+- Fixed sidebar user footer layout so administrator and email labels no longer overlap.
+
 ## [2.2.45] - 2026-05-19
 
 ### Added

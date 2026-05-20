@@ -415,18 +415,18 @@ function UsersContent() {
             </div>
           ) : users && users.length > 0 ? (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[1120px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[60px]">ID</TableHead>
-                    <TableHead>用户</TableHead>
-                    <TableHead className="hidden sm:table-cell">角色</TableHead>
-                    <TableHead>流量使用</TableHead>
-                    <TableHead className="hidden md:table-cell">余额</TableHead>
-                    <TableHead className="hidden md:table-cell">到期时间</TableHead>
-                    <TableHead className="hidden lg:table-cell">权限</TableHead>
-                    <TableHead className="hidden lg:table-cell">规则限制</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                    <TableHead className="w-[60px] whitespace-nowrap">ID</TableHead>
+                    <TableHead className="w-[240px] whitespace-nowrap">用户</TableHead>
+                    <TableHead className="hidden w-[140px] whitespace-nowrap sm:table-cell">角色</TableHead>
+                    <TableHead className="w-[170px] whitespace-nowrap">流量使用</TableHead>
+                    <TableHead className="hidden w-[120px] whitespace-nowrap md:table-cell">余额</TableHead>
+                    <TableHead className="hidden w-[140px] whitespace-nowrap md:table-cell">到期时间</TableHead>
+                    <TableHead className="hidden w-[130px] whitespace-nowrap lg:table-cell">权限</TableHead>
+                    <TableHead className="hidden w-[130px] whitespace-nowrap lg:table-cell">规则限制</TableHead>
+                    <TableHead className="w-[190px] whitespace-nowrap text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -452,8 +452,8 @@ function UsersContent() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-medium text-sm leading-none">{u.name || "未命名"}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">{u.username}</p>
+                              <p className="truncate text-sm font-medium leading-none">{u.name || "未命名"}</p>
+                              <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{u.username}</p>
                               {u.id === currentUser?.id && (
                                 <p className="text-[10px] text-primary">当前登录</p>
                               )}
@@ -569,7 +569,7 @@ function UsersContent() {
                           </div>
                         </TableCell>
                         <TableCell className="hidden lg:table-cell">
-                          <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                          <div className="flex flex-col gap-0.5 whitespace-nowrap text-xs text-muted-foreground">
                             <span>规则: {u.maxRules ? `最多 ${u.maxRules} 条` : "不限"}</span>
                             <span>端口: {u.maxPorts ? `最多 ${u.maxPorts} 个` : "不限"}</span>
                             <span>连接: {u.maxConnections ? `最多 ${u.maxConnections}` : "不限"}</span>

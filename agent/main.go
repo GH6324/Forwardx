@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -96,6 +97,14 @@ type tunnelProbe struct {
 type agentUpgrade struct {
 	TargetVersion string `json:"targetVersion"`
 	PanelURL      string `json:"panelUrl"`
+}
+
+type migratedPanelError struct {
+	PanelURL string
+}
+
+func (e migratedPanelError) Error() string {
+	return "panel migrated to " + e.PanelURL
 }
 
 type selfTest struct {
@@ -220,7 +229,15 @@ func heartbeat(cfg Config) (int, error) {
 	}
 	var resp heartbeatResp
 	if err := post(cfg, "/api/agent/heartbeat", payload, &resp); err != nil {
+		var migrated migratedPanelError
+		if errors.As(err, &migrated) {
+			go selfUpgrade(cfg, &agentUpgrade{TargetVersion: "9999.0.0", PanelURL: migrated.PanelURL})
+			return cfg.Interval, nil
+		}
 		return cfg.Interval, err
+	}
+	if resp.AgentUpgrade != nil {
+		go selfUpgrade(cfg, resp.AgentUpgrade)
 	}
 	for _, a := range resp.Actions {
 		go handleAction(cfg, a)
@@ -237,9 +254,6 @@ func heartbeat(cfg Config) (int, error) {
 	if lastTCPingAt.IsZero() || time.Since(lastTCPingAt) >= time.Minute {
 		collectTCPing(cfg, resp.TunnelProbes)
 		lastTCPingAt = time.Now()
-	}
-	if resp.AgentUpgrade != nil {
-		go selfUpgrade(cfg, resp.AgentUpgrade)
 	}
 	return resp.NextInterval, nil
 }
@@ -919,18 +933,39 @@ func post(cfg Config, path string, payload any, out any) error {
 	}
 	defer res.Body.Close()
 	resBody, _ := io.ReadAll(res.Body)
-	if res.StatusCode >= 300 {
-		return fmt.Errorf("%s: %s", res.Status, string(resBody))
-	}
+	decodedBody := resBody
 	var respEnv envelope
+	var decryptErr error
 	if err := json.Unmarshal(resBody, &respEnv); err == nil && respEnv.V == 1 {
-		plain, err := decrypt(respEnv, cfg.Token)
-		if err != nil {
-			return err
+		if plain, err := decrypt(respEnv, cfg.Token); err == nil {
+			decodedBody = plain
+		} else {
+			decryptErr = err
 		}
-		return json.Unmarshal(plain, out)
 	}
-	return json.Unmarshal(resBody, out)
+	if res.StatusCode >= 300 {
+		var migrated struct {
+			PanelURL      string        `json:"panelUrl"`
+			AgentUpgrade *agentUpgrade `json:"agentUpgrade"`
+		}
+		if err := json.Unmarshal(decodedBody, &migrated); err == nil {
+			panelURL := strings.TrimSpace(migrated.PanelURL)
+			if panelURL == "" && migrated.AgentUpgrade != nil {
+				panelURL = strings.TrimSpace(migrated.AgentUpgrade.PanelURL)
+			}
+			if panelURL != "" {
+				return migratedPanelError{PanelURL: panelURL}
+			}
+		}
+		if decryptErr != nil {
+			return fmt.Errorf("%s: %v", res.Status, decryptErr)
+		}
+		return fmt.Errorf("%s: %s", res.Status, string(decodedBody))
+	}
+	if decryptErr != nil {
+		return decryptErr
+	}
+	return json.Unmarshal(decodedBody, out)
 }
 
 func encrypt(payload any, token string) (envelope, error) {

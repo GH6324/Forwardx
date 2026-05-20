@@ -30,6 +30,11 @@ agentRouter.get("/api/agent/events", async (req: Request, res: Response) => {
     const token = authHeader.substring(7);
     const host = await db.getHostByAgentToken(token);
     if (!host) {
+      const migratedTo = await db.getSetting("migratedToPanelUrl");
+      if (migratedTo) {
+        res.status(410).json({ error: "Panel migrated", panelUrl: migratedTo });
+        return;
+      }
       res.status(401).json({ error: "Invalid token" });
       return;
     }
@@ -83,6 +88,11 @@ agentRouter.post("/api/agent/register", async (req: Request, res: Response) => {
     // 验证 token
     const agentToken = await db.getAgentTokenByToken(token);
     if (!agentToken) {
+      const migratedTo = await db.getSetting("migratedToPanelUrl");
+      if (migratedTo) {
+        res.status(410).json({ error: "Panel migrated", panelUrl: migratedTo });
+        return;
+      }
       res.status(401).json({ error: "Invalid token" });
       return;
     }

@@ -1,11 +1,12 @@
 import { Request, Response, Router } from "express";
 import { MIGRATION_TABLES, ensureDatabaseSchema } from "./dbSchema";
-import { connectDatabase, executeRaw, getDatabaseKind, queryRaw } from "./dbRuntime";
+import { connectDatabase, executeRaw, getDatabaseKind, nowDate, queryRaw } from "./dbRuntime";
 import { getAllSettings, setSetting } from "./repositories/settingsRepository";
 import { getHosts, getUserByUsername, requestHostAgentUpgrade } from "./db";
 import { verifyPassword } from "./password";
 import { pushAgentUpgrade } from "./agentEvents";
 import { AGENT_VERSION } from "./_core/systemRouter";
+import { consumeMigrationCodeForTakeover, consumeTakeoverToken } from "./migrationCodes";
 
 export type MigrationJobStatus = "pending" | "running" | "success" | "failed";
 
@@ -13,6 +14,7 @@ export interface MigrationSnapshot {
   version: 1;
   exportedAt: number;
   sourcePanelUrl?: string;
+  takeoverToken?: string;
   tables: Record<string, Record<string, any>[]>;
 }
 
@@ -94,6 +96,7 @@ export async function importMigrationSnapshot(snapshot: MigrationSnapshot, onPro
   if (!snapshot.tables.system_settings?.some((row) => row.key === "storeEnabled")) {
     await setSetting("storeEnabled", "false");
   }
+  await markImportedAgentsOffline();
 }
 
 export async function verifyAdminCredentials(username: string, password: string) {
@@ -102,21 +105,47 @@ export async function verifyAdminCredentials(username: string, password: string)
   return verifyPassword(password, user.password);
 }
 
-export async function announcePanelMigration(targetPanelUrl: string) {
+export async function announcePanelMigration(targetPanelUrl: string, options: { forceAgentSwitch?: boolean } = {}) {
   const normalized = normalizePanelUrl(targetPanelUrl);
   await setSetting("panelPublicUrl", normalized);
   const hosts = await getHosts();
+  const targetVersion = options.forceAgentSwitch ? "9999.0.0" : AGENT_VERSION;
   for (const host of hosts as any[]) {
-    await requestHostAgentUpgrade(Number(host.id), AGENT_VERSION);
-    pushAgentUpgrade(Number(host.id), AGENT_VERSION, normalized);
+    await requestHostAgentUpgrade(Number(host.id), targetVersion);
+    pushAgentUpgrade(Number(host.id), targetVersion, normalized);
   }
   return { hostCount: hosts.length, panelUrl: normalized };
 }
 
+async function markImportedAgentsOffline() {
+  await executeRaw(`UPDATE ${quote("hosts")} SET ${quote("isOnline")} = ?, ${quote("lastHeartbeat")} = NULL`, [0]);
+}
+
+async function retainOnlyAdminAccountAndSettings(targetPanelUrl: string) {
+  await connectDatabase();
+  await ensureDatabaseSchema();
+  const settings = await getAllSettings();
+  for (const table of [...MIGRATION_TABLES].reverse()) {
+    if (table === "users") continue;
+    await executeRaw(`DELETE FROM ${quote(table)}`);
+  }
+  await executeRaw(`DELETE FROM ${quote("users")} WHERE ${quote("role")} <> ?`, ["admin"]);
+  const normalized = normalizePanelUrl(targetPanelUrl);
+  await setSetting("databaseConfigured", "true");
+  await setSetting("databaseType", getDatabaseKind() || "");
+  await setSetting("mysqlConfigured", getDatabaseKind() === "mysql" ? "true" : "false");
+  await setSetting("mysqlHost", settings.mysqlHost ?? null);
+  await setSetting("mysqlDatabase", settings.mysqlDatabase ?? null);
+  await setSetting("sqlitePath", settings.sqlitePath ?? null);
+  await setSetting("setupDataChoice", "new-panel");
+  await setSetting("panelPublicUrl", normalized);
+  await setSetting("migratedToPanelUrl", normalized);
+  await setSetting("migratedAt", String(Math.floor(nowDate().getTime() / 1000)));
+}
+
 async function fetchSnapshotFromOldPanel(input: {
   oldPanelUrl: string;
-  username: string;
-  password: string;
+  migrationCode: string;
   targetPanelUrl: string;
 }) {
   const url = `${normalizePanelUrl(input.oldPanelUrl)}/api/migration/export`;
@@ -124,8 +153,7 @@ async function fetchSnapshotFromOldPanel(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      username: input.username,
-      password: input.password,
+      migrationCode: input.migrationCode,
       targetPanelUrl: input.targetPanelUrl,
     }),
   });
@@ -136,10 +164,31 @@ async function fetchSnapshotFromOldPanel(input: {
   return JSON.parse(body) as MigrationSnapshot;
 }
 
+async function finalizeOldPanelTakeover(input: {
+  oldPanelUrl: string;
+  targetPanelUrl: string;
+  takeoverToken?: string;
+}) {
+  if (!input.takeoverToken) return null;
+  const url = `${normalizePanelUrl(input.oldPanelUrl)}/api/migration/takeover-complete`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      takeoverToken: input.takeoverToken,
+      targetPanelUrl: input.targetPanelUrl,
+    }),
+  });
+  const body = await resp.text();
+  if (!resp.ok) {
+    throw new Error(body || `旧面板接管确认返回 ${resp.status}`);
+  }
+  return body ? JSON.parse(body) : null;
+}
+
 export function startPanelMigration(input: {
   oldPanelUrl: string;
-  username: string;
-  password: string;
+  migrationCode: string;
   targetPanelUrl: string;
 }) {
   const job: MigrationJob = {
@@ -157,8 +206,15 @@ export function startPanelMigration(input: {
       const snapshot = await fetchSnapshotFromOldPanel(input);
       setJob(job, { progress: 35, step: "已获取旧面板数据，正在准备新数据库" });
       await importMigrationSnapshot(snapshot, (progress, step) => setJob(job, { progress, step }));
-      setJob(job, { progress: 96, step: "正在写入新面板地址" });
+      setJob(job, { progress: 94, step: "正在写入新面板地址" });
       await setSetting("panelPublicUrl", normalizePanelUrl(input.targetPanelUrl));
+      await setSetting("setupDataChoice", "use-existing");
+      setJob(job, { progress: 96, step: "正在通知旧面板切换 Agent" });
+      await finalizeOldPanelTakeover({
+        oldPanelUrl: input.oldPanelUrl,
+        targetPanelUrl: input.targetPanelUrl,
+        takeoverToken: snapshot.takeoverToken,
+      });
       setJob(job, { status: "success", progress: 100, step: "迁移完成", finishedAt: Date.now() });
     } catch (error) {
       setJob(job, {
@@ -178,23 +234,41 @@ export const migrationRouter = Router();
 
 migrationRouter.post("/api/migration/export", async (req: Request, res: Response) => {
   try {
-    const username = String(req.body?.username || "");
-    const password = String(req.body?.password || "");
+    const migrationCode = String(req.body?.migrationCode || "");
     const targetPanelUrl = String(req.body?.targetPanelUrl || "");
-    if (!username || !password) {
-      res.status(400).json({ error: "username/password required" });
+    if (!migrationCode) {
+      res.status(400).json({ error: "migrationCode required" });
       return;
     }
-    if (!(await verifyAdminCredentials(username, password))) {
-      res.status(401).json({ error: "管理员账户或密码错误" });
+    const takeover = consumeMigrationCodeForTakeover(migrationCode);
+    if (!takeover) {
+      res.status(401).json({ error: "迁移码无效、已过期或已使用" });
       return;
-    }
-    if (targetPanelUrl) {
-      await announcePanelMigration(targetPanelUrl);
     }
     const settings = await getAllSettings();
     const snapshot = await exportMigrationSnapshot(settings.panelPublicUrl || undefined);
+    snapshot.takeoverToken = takeover.takeoverToken;
     res.json(snapshot);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+migrationRouter.post("/api/migration/takeover-complete", async (req: Request, res: Response) => {
+  try {
+    const takeoverToken = String(req.body?.takeoverToken || "");
+    const targetPanelUrl = String(req.body?.targetPanelUrl || "");
+    if (!takeoverToken || !targetPanelUrl) {
+      res.status(400).json({ error: "takeoverToken/targetPanelUrl required" });
+      return;
+    }
+    if (!consumeTakeoverToken(takeoverToken)) {
+      res.status(401).json({ error: "接管令牌无效、已过期或已使用" });
+      return;
+    }
+    const takeover = await announcePanelMigration(targetPanelUrl, { forceAgentSwitch: true });
+    await retainOnlyAdminAccountAndSettings(targetPanelUrl);
+    res.json({ success: true, ...takeover });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

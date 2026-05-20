@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import {
@@ -876,6 +877,8 @@ function SystemInfoSection() {
     { refetchInterval: 5000 }
   );
   const [panelUrlInput, setPanelUrlInput] = useState("");
+  const [homepageEnabled, setHomepageEnabled] = useState(true);
+  const [migrationCode, setMigrationCode] = useState<{ code: string; expiresAt: number; expiresInSeconds: number } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
   const previousUpgradeStatus = useRef<string | null>(null);
@@ -884,6 +887,7 @@ function SystemInfoSection() {
   useEffect(() => {
     if (settings) {
       setPanelUrlInput(settings.panelPublicUrl || "");
+      setHomepageEnabled(settings.homepageEnabled ?? true);
     }
   }, [settings]);
 
@@ -915,6 +919,27 @@ function SystemInfoSection() {
       return;
     }
     updateSettingsMutation.mutate({ panelPublicUrl: v });
+  };
+
+  const handleSaveHomepage = () => {
+    updateSettingsMutation.mutate({ homepageEnabled });
+  };
+
+  const createMigrationCodeMutation = trpc.system.createMigrationCode.useMutation({
+    onSuccess: (data) => {
+      setMigrationCode(data);
+      toast.success("迁移码已生成，5 分钟内有效");
+    },
+    onError: (err) => toast.error(err.message || "生成迁移码失败"),
+  });
+
+  const copyMigrationCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success("迁移码已复制");
+    } catch {
+      window.prompt("请手动复制迁移码：", code);
+    }
   };
 
   const startUpgradeMutation = trpc.system.startUpgrade.useMutation({
@@ -993,6 +1018,68 @@ function SystemInfoSection() {
           </p>
         </CardContent>
       </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-border/40 bg-card/60 backdrop-blur-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe className="h-4 w-4 text-primary" />
+              公开首页
+            </CardTitle>
+            <CardDescription>
+              开启后未登录访问根路径会展示面板功能介绍和登录/注册入口；关闭后直接进入登录页。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between rounded-lg border border-border/40 bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium">启用公开首页</p>
+                <p className="text-xs text-muted-foreground">适合需要开放注册或展示服务能力的面板。</p>
+              </div>
+              <Switch checked={homepageEnabled} onCheckedChange={setHomepageEnabled} />
+            </div>
+            <Button variant="outline" onClick={handleSaveHomepage} disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? "保存中..." : "保存首页开关"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/40 bg-card/60 backdrop-blur-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Key className="h-4 w-4 text-primary" />
+              旧面板迁移码
+            </CardTitle>
+            <CardDescription>
+              在旧面板生成迁移码后，到新面板首次安装向导中填入旧面板地址和迁移码即可导入。新面板确认导入成功后会接管 Agent，旧面板会清空业务数据并仅保留管理员账户。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {migrationCode ? (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <p className="text-xs text-muted-foreground">迁移码</p>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <code className="break-all font-mono text-lg font-semibold tracking-widest">{migrationCode.code}</code>
+                  <Button variant="outline" size="sm" onClick={() => copyMigrationCode(migrationCode.code)}>
+                    <Copy className="mr-2 h-3.5 w-3.5" />
+                    复制
+                  </Button>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">有效至 {new Date(migrationCode.expiresAt).toLocaleTimeString()}</p>
+              </div>
+            ) : (
+              <Alert>
+                <ShieldCheck className="h-4 w-4" />
+                <AlertTitle>一次性迁移码</AlertTitle>
+                <AlertDescription>生成后请尽快在新面板使用，不要公开分享。迁移码 5 分钟有效，使用后失效。</AlertDescription>
+              </Alert>
+            )}
+            <Button onClick={() => createMigrationCodeMutation.mutate()} disabled={createMigrationCodeMutation.isPending}>
+              {createMigrationCodeMutation.isPending ? "生成中..." : "生成迁移码"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* 版本升级 */}
       <Card className="border-border/40 bg-card/60 backdrop-blur-md">

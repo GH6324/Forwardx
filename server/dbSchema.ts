@@ -133,6 +133,7 @@ const tables: TableDef[] = [
 
 const seedSettings = [
   ["storeEnabled", "false"],
+  ["homepageEnabled", "true"],
   ["redemptionEnabled", "true"],
   ["discountEnabled", "true"],
 ] as const;

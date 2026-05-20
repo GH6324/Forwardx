@@ -5,6 +5,8 @@ import { ENV } from "../env";
 import { spawn } from "child_process";
 import fs from "fs";
 import { clearPanelLogs, getPanelLogs, getPanelLogSummary } from "./panelLogger";
+import { createMigrationCode } from "../migrationCodes";
+import { sendMail } from "../email";
 
 /**
  * 系统级别 router：
@@ -16,7 +18,7 @@ import { clearPanelLogs, getPanelLogs, getPanelLogSummary } from "./panelLogger"
 export const REPO_URL = "https://github.com/poouo/Forwardx";
 /** Telegram 双向消息机器人：用户可通过此反馈问题、接收补充信息 */
 export const TELEGRAM_BOT_URL = "https://t.me/miyin_private_bot";
-export const APP_VERSION = "2.2.46";
+export const APP_VERSION = "2.2.47";
 export const AGENT_VERSION = "2.2.45";
 const UPDATE_CHECK_COOLDOWN_MS = 60 * 1000;
 const MANUAL_LOCAL_UPGRADE_COMMAND =
@@ -230,6 +232,7 @@ export const systemRouter = router({
       version: APP_VERSION,
       agentVersion: AGENT_VERSION,
       panelPublicUrl: all.panelPublicUrl ?? "",
+      homepageEnabled: all.homepageEnabled !== "false",
       database: {
         type: all.databaseType || (all.mysqlConfigured === "true" ? "mysql" : "sqlite"),
         configured: Boolean(all.databaseConfigured || all.mysqlConfigured),
@@ -269,6 +272,7 @@ export const systemRouter = router({
     .input(
       z.object({
         panelPublicUrl: z.string().max(256).optional(),
+        homepageEnabled: z.boolean().optional(),
         email: z.object({
           enabled: z.boolean().optional(),
           host: z.string().max(256).optional(),
@@ -295,6 +299,10 @@ export const systemRouter = router({
         await db.setSetting("panelPublicUrl", normalized || null);
         console.info(`[Settings] panelPublicUrl ${normalized ? "updated" : "cleared"}`);
       }
+      if (input.homepageEnabled !== undefined) {
+        await db.setSetting("homepageEnabled", input.homepageEnabled ? "true" : "false");
+        console.info(`[Settings] homepage ${input.homepageEnabled ? "enabled" : "disabled"}`);
+      }
       if (input.email) {
         const email = input.email;
         const next: Record<string, string | null> = {};
@@ -312,6 +320,21 @@ export const systemRouter = router({
         await db.setSettings(next);
         console.info("[Settings] email settings updated");
       }
+      return { success: true };
+    }),
+
+  createMigrationCode: adminProcedure.mutation(() => {
+    return createMigrationCode();
+  }),
+
+  sendTestEmail: adminProcedure
+    .input(z.object({ to: z.string().email("请输入有效邮箱地址") }))
+    .mutation(async ({ input }) => {
+      await sendMail({
+        to: input.to,
+        subject: "ForwardX 邮箱测试",
+        text: "这是一封 ForwardX 邮箱对接测试邮件。如果你收到此邮件，说明 SMTP 配置已生效。",
+      });
       return { success: true };
     }),
 

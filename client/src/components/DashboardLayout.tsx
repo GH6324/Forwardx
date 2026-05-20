@@ -46,6 +46,7 @@ import {
   Package,
   ShoppingBag,
   Megaphone,
+  Mail,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -71,6 +72,7 @@ const adminMenuItems = [
   { icon: WalletCards, label: "余额与兑换", path: "/billing" },
   { icon: Package, label: "套餐管理", path: "/plans" },
   { icon: Users, label: "用户管理", path: "/users" },
+  { icon: Mail, label: "邮箱设置", path: "/email-settings" },
   { icon: Settings, label: "系统设置", path: "/settings" },
 ];
 
@@ -361,15 +363,15 @@ function DashboardLayoutContent({
                     {user?.name?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
-                <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium truncate leading-none">
+                <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium leading-none">
                       {user?.name || user?.username || "-"}
                     </p>
                     {isAdmin && (
                       <Badge
                         variant="secondary"
-                        className="text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary border-0"
+                        className="h-4 shrink-0 whitespace-nowrap border-0 bg-primary/10 px-1.5 py-0 text-[10px] leading-none text-primary"
                       >
                         管理员
                       </Badge>

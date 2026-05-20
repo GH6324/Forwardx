@@ -25,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useMemo } from "react";
+import PublicHome from "./PublicHome";
 import {
   Area,
   AreaChart,
@@ -596,6 +597,20 @@ function DashboardContent() {
 }
 
 export default function Home() {
+  const { user, loading } = useAuth();
+  const { data: settings, isLoading: settingsLoading } = trpc.system.getSettings.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  if (loading || settingsLoading) return null;
+
+  if (!user) {
+    if (settings?.homepageEnabled !== false) return <PublicHome />;
+    if (typeof window !== "undefined") window.location.href = "/login";
+    return null;
+  }
+
   return (
     <DashboardLayout>
       <DashboardContent />

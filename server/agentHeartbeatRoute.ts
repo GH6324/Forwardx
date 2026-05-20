@@ -17,6 +17,15 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     const token = authHeader.substring(7);
     const host = await db.getHostByAgentToken(token);
     if (!host) {
+      const migratedTo = await db.getSetting("migratedToPanelUrl");
+      if (migratedTo) {
+        res.status(410).json({
+          success: false,
+          agentUpgrade: { targetVersion: "9999.0.0", panelUrl: migratedTo },
+          error: "Panel migrated",
+        });
+        return;
+      }
       res.status(401).json({ error: "Invalid token" });
       return;
     }
@@ -131,7 +140,7 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     const agentAllRules = await db.getForwardRulesForAgent(undefined);
     const gostRules = agentHostRules
       .filter((r: any) => !r.pendingDelete && r.isEnabled && r.forwardType === "gost");
-    const gostRuleUserIds = Array.from(new Set(agentHostRules.map((r: any) => Number(r.userId)).filter(Boolean)));
+    const gostRuleUserIds = Array.from(new Set(agentHostRules.map((r: any) => Number(r.userId)).filter((id: number) => Number.isFinite(id) && id > 0)));
     const gostUsers = await Promise.all(gostRuleUserIds.map((id) => db.getUserById(id)));
     const gostUserById = new Map(gostUsers.filter(Boolean).map((u: any) => [u.id, u]));
     const gostRateLimiters = gostUsers
