@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.55] - 2026-05-22
+
+### Added
+
+- Added global system switches for all forwarding and tunnel protocols. Disabled protocols are hidden from new selections, existing rules/tunnels stop running without being deleted, and users can only delete unsupported existing entries until an administrator re-enables the protocol.
+
+### Changed
+
+- Bumped panel version to 2.2.55. Agent version remains 2.2.45.
+
 ## [2.2.54] - 2026-05-22
 
 ### Fixed

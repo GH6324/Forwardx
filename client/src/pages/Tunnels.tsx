@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -44,8 +45,13 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import {
+  FORWARD_PROTOCOL_LABELS,
+  normalizeForwardProtocolSettings,
+  type ForwardProtocolKey,
+} from "@shared/forwardTypes";
 import {
   Area,
   AreaChart,
@@ -87,6 +93,7 @@ const tunnelModeLabels: Record<TunnelForm["mode"], string> = {
 };
 
 const gostTunnelModes: TunnelForm["mode"][] = ["tls", "wss", "tcp", "mtls", "mwss", "mtcp"];
+const unsupportedProtocolTitle = "当前不支持，请联系管理员";
 
 const gostTunnelOptions: Array<{
   mode: Exclude<TunnelForm["mode"], "forwardx">;
@@ -373,17 +380,39 @@ function TunnelsContent() {
   const utils = trpc.useUtils();
   const { data: tunnels, isLoading } = trpc.tunnels.list.useQuery(undefined, { refetchInterval: 10000 });
   const { data: hosts } = trpc.hosts.list.useQuery();
+  const { data: systemSettings } = trpc.system.getSettings.useQuery();
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<TunnelForm>(defaultForm);
   const [latencyTunnel, setLatencyTunnel] = useState<{ id: number; name: string } | null>(null);
   const [testTunnel, setTestTunnel] = useState<{ id: number; name: string } | null>(null);
 
-  const activeCount = useMemo(() => tunnels?.filter((t: any) => t.isRunning).length ?? 0, [tunnels]);
+  const forwardProtocolSettings = useMemo(
+    () => normalizeForwardProtocolSettings(systemSettings?.forwardProtocols),
+    [systemSettings?.forwardProtocols]
+  );
+  const getTunnelProtocolKey = (tunnel: any | null | undefined): ForwardProtocolKey | null => {
+    const mode = String(tunnel?.mode || "").toLowerCase();
+    return (["forwardx", "tls", "wss", "tcp", "mtls", "mwss", "mtcp"] as const).includes(mode as any)
+      ? mode as ForwardProtocolKey
+      : null;
+  };
+  const isTunnelSupported = (tunnel: any | null | undefined) => {
+    const key = getTunnelProtocolKey(tunnel);
+    return !key || forwardProtocolSettings[key] !== false;
+  };
+  const enabledGostTunnelModes = useMemo(
+    () => gostTunnelModes.filter((mode) => forwardProtocolSettings[mode] !== false),
+    [forwardProtocolSettings]
+  );
+  const activeCount = useMemo(() => tunnels?.filter((t: any) => t.isRunning && isTunnelSupported(t)).length ?? 0, [forwardProtocolSettings, tunnels]);
   const getHostName = (id: number) => hosts?.find((h: any) => h.id === id)?.name || `主机 #${id}`;
 
   const resetForm = () => {
-    setForm(defaultForm);
+    const fallbackMode = forwardProtocolSettings.forwardx !== false
+      ? "forwardx"
+      : enabledGostTunnelModes[0] || "forwardx";
+    setForm({ ...defaultForm, mode: fallbackMode });
     setEditingId(null);
   };
 
@@ -396,6 +425,7 @@ function TunnelsContent() {
   };
 
   const openEdit = (tunnel: any) => {
+    if (!isTunnelSupported(tunnel)) return;
     setForm({
       name: tunnel.name,
       entryHostId: tunnel.entryHostId,
@@ -449,6 +479,10 @@ function TunnelsContent() {
       toast.error("出口监听端口必须为 0 或 1-65535，0 表示自动分配");
       return;
     }
+    if (!isTunnelSupported(form)) {
+      toast.error(unsupportedProtocolTitle);
+      return;
+    }
     const payload = {
       name: form.name,
       entryHostId: form.entryHostId,
@@ -461,6 +495,14 @@ function TunnelsContent() {
   };
 
   const isPending = createMutation.isPending || updateMutation.isPending;
+  const renderUnsupportedHint = (children: ReactNode) => (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent>{unsupportedProtocolTitle}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 
   return (
     <div className="space-y-6">
@@ -476,7 +518,12 @@ function TunnelsContent() {
             <Activity className="h-3 w-3 text-chart-2" />
             {activeCount} / {tunnels?.length ?? 0} 活跃
           </Badge>
-          <Button onClick={openCreate} className="gap-2" disabled={!hosts || hosts.length < 2}>
+          <Button
+            onClick={openCreate}
+            className="gap-2"
+            disabled={!hosts || hosts.length < 2 || (forwardProtocolSettings.forwardx === false && enabledGostTunnelModes.length === 0)}
+            title={forwardProtocolSettings.forwardx === false && enabledGostTunnelModes.length === 0 ? unsupportedProtocolTitle : undefined}
+          >
             <Plus className="h-4 w-4" />
             添加隧道
           </Button>
@@ -504,11 +551,16 @@ function TunnelsContent() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tunnels.map((tunnel: any) => (
-                    <TableRow key={tunnel.id}>
+                  {tunnels.map((tunnel: any) => {
+                    const supported = isTunnelSupported(tunnel);
+                    const protocolKey = getTunnelProtocolKey(tunnel);
+                    return (
+                    <TableRow key={tunnel.id} className={!supported ? "opacity-70" : ""} title={!supported ? unsupportedProtocolTitle : undefined}>
                       <TableCell>
                         <div className="flex items-center justify-center">
-                          {tunnel.isRunning ? (
+                          {!supported ? (
+                            <span className="h-2.5 w-2.5 rounded-full bg-destructive/60" />
+                          ) : tunnel.isRunning ? (
                             <span className="h-2.5 w-2.5 rounded-full bg-chart-2 shadow-sm shadow-chart-2/50 animate-pulse" />
                           ) : tunnel.isEnabled ? (
                             <span className="h-2.5 w-2.5 rounded-full bg-amber-400 shadow-sm shadow-amber-400/50" />
@@ -519,6 +571,11 @@ function TunnelsContent() {
                       </TableCell>
                       <TableCell>
                         <span className="font-medium">{tunnel.name}</span>
+                        {!supported && (
+                          <span className="mt-1 block text-[11px] text-destructive">
+                            {protocolKey ? FORWARD_PROTOCOL_LABELS[protocolKey] : "该协议"} 当前不支持
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 text-xs">
@@ -549,39 +606,48 @@ function TunnelsContent() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Switch
-                          checked={tunnel.isEnabled}
-                          onCheckedChange={(checked) => updateMutation.mutate({ id: tunnel.id, isEnabled: checked })}
-                          className="scale-75"
-                        />
+                        {supported ? (
+                          <Switch
+                            checked={tunnel.isEnabled}
+                            onCheckedChange={(checked) => updateMutation.mutate({ id: tunnel.id, isEnabled: checked })}
+                            className="scale-75"
+                          />
+                        ) : (
+                          renderUnsupportedHint(<span className="inline-flex"><Switch checked={false} disabled className="scale-75" /></span>)
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="查看入口到出口延迟"
-                            onClick={() => setLatencyTunnel({ id: tunnel.id, name: tunnel.name })}
-                          >
-                            <Activity className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="测试入口到出口延迟"
-                            onClick={() => setTestTunnel({ id: tunnel.id, name: tunnel.name })}
-                          >
-                            <Stethoscope className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(tunnel)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
+                          {supported && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="查看入口到出口延迟"
+                                onClick={() => setLatencyTunnel({ id: tunnel.id, name: tunnel.name })}
+                              >
+                                <Activity className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="测试入口到出口延迟"
+                                onClick={() => setTestTunnel({ id: tunnel.id, name: tunnel.name })}
+                              >
+                                <Stethoscope className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(tunnel)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-destructive hover:text-destructive"
+                            title={!supported ? unsupportedProtocolTitle : undefined}
                             onClick={() => {
                               if (confirm("确定要删除此隧道吗？关联转发规则会解除隧道绑定。")) {
                                 deleteMutation.mutate({ id: tunnel.id });
@@ -593,7 +659,8 @@ function TunnelsContent() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -642,12 +709,17 @@ function TunnelsContent() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  onClick={() => setForm({ ...form, mode: gostTunnelModes.includes(form.mode) ? form.mode : "tls" })}
+                  onClick={() => {
+                    const nextMode = enabledGostTunnelModes.includes(form.mode) ? form.mode : enabledGostTunnelModes[0];
+                    if (nextMode) setForm({ ...form, mode: nextMode });
+                  }}
+                  disabled={enabledGostTunnelModes.length === 0}
+                  title={enabledGostTunnelModes.length === 0 ? unsupportedProtocolTitle : undefined}
                   className={`flex min-h-[92px] items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
                     gostTunnelModes.includes(form.mode)
                       ? "border-primary bg-primary/5 text-foreground"
                       : "border-border bg-background hover:border-primary/40"
-                  }`}
+                  } ${enabledGostTunnelModes.length === 0 ? "cursor-not-allowed opacity-50" : ""}`}
                 >
                   <Network className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <span className="space-y-1">
@@ -658,11 +730,13 @@ function TunnelsContent() {
                 <button
                   type="button"
                   onClick={() => setForm({ ...form, mode: "forwardx" })}
+                  disabled={forwardProtocolSettings.forwardx === false}
+                  title={forwardProtocolSettings.forwardx === false ? unsupportedProtocolTitle : undefined}
                   className={`flex min-h-[92px] items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
                     form.mode === "forwardx"
                       ? "border-primary bg-primary/5 text-foreground"
                       : "border-border bg-background hover:border-primary/40"
-                  }`}
+                  } ${forwardProtocolSettings.forwardx === false ? "cursor-not-allowed opacity-50" : ""}`}
                 >
                   <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <span className="space-y-1">
@@ -679,7 +753,7 @@ function TunnelsContent() {
                   <Label>中国入口 → 海外出口可选配置</Label>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {gostTunnelOptions.map((preset) => (
+                  {gostTunnelOptions.filter((preset) => enabledGostTunnelModes.includes(preset.mode)).map((preset) => (
                     <button
                       key={preset.mode}
                       type="button"
@@ -695,6 +769,9 @@ function TunnelsContent() {
                     </button>
                   ))}
                 </div>
+                {enabledGostTunnelModes.length === 0 && (
+                  <p className="text-xs text-amber-600">{unsupportedProtocolTitle}</p>
+                )}
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -721,15 +798,12 @@ function TunnelsContent() {
               {form.mode !== "forwardx" && (
               <div className="space-y-2">
                 <Label>GOST 协议</Label>
-                <Select value={form.mode} onValueChange={(v) => setForm({ ...form, mode: v as any })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="tls">TLS</SelectItem>
-                    <SelectItem value="wss">WSS</SelectItem>
-                    <SelectItem value="tcp">TCP</SelectItem>
-                    <SelectItem value="mtls">MTLS</SelectItem>
-                    <SelectItem value="mwss">MWSS</SelectItem>
-                    <SelectItem value="mtcp">MTCP</SelectItem>
+                    <Select value={form.mode} onValueChange={(v) => setForm({ ...form, mode: v as any })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                    {enabledGostTunnelModes.map((mode) => (
+                      <SelectItem key={mode} value={mode}>{tunnelModeLabels[mode]}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -743,7 +817,7 @@ function TunnelsContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDialog(false)}>取消</Button>
-            <Button onClick={handleSubmit} disabled={isPending}>{isPending ? "保存中..." : editingId ? "保存" : "创建"}</Button>
+            <Button onClick={handleSubmit} disabled={isPending || !isTunnelSupported(form)}>{isPending ? "保存中..." : editingId ? "保存" : "创建"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

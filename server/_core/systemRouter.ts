@@ -8,6 +8,12 @@ import { clearPanelLogs, getPanelLogs, getPanelLogSummary } from "./panelLogger"
 import { approveMigrationRequest, createMigrationCode, getCurrentMigrationCode, rejectMigrationRequest } from "../migrationCodes";
 import { sendMail } from "../email";
 import { refreshTelegramBotProfile, resetTelegramBotPolling, startTelegramBot } from "../telegramBot";
+import { pushAgentRefresh } from "../agentEvents";
+import {
+  FORWARD_TYPES,
+  TUNNEL_PROTOCOLS,
+  normalizeForwardProtocolSettings,
+} from "../../shared/forwardTypes";
 
 /**
  * 系统级别 router：
@@ -19,13 +25,18 @@ import { refreshTelegramBotProfile, resetTelegramBotPolling, startTelegramBot } 
 export const REPO_URL = "https://github.com/poouo/Forwardx";
 /** Telegram 双向消息机器人：用户可通过此反馈问题、接收补充信息 */
 export const TELEGRAM_BOT_URL = "https://t.me/miyin_private_bot";
-export const APP_VERSION = "2.2.54";
+export const APP_VERSION = "2.2.55";
 export const AGENT_VERSION = "2.2.45";
 const UPDATE_CHECK_COOLDOWN_MS = 60 * 1000;
 const MANUAL_LOCAL_UPGRADE_COMMAND =
   "curl -fsSL https://raw.githubusercontent.com/poouo/Forwardx/main/scripts/install-panel-local.sh | sudo bash -s -- upgrade";
 const MANUAL_DOCKER_UPGRADE_COMMAND =
   "curl -fsSL https://raw.githubusercontent.com/poouo/Forwardx/main/scripts/install-panel-docker.sh | sudo bash -s -- upgrade";
+const forwardProtocolSettingsSchema = z.object(
+  Object.fromEntries(
+    [...FORWARD_TYPES, ...TUNNEL_PROTOCOLS].map((key) => [key, z.boolean().optional()])
+  ) as Record<(typeof FORWARD_TYPES[number] | typeof TUNNEL_PROTOCOLS[number]), z.ZodOptional<z.ZodBoolean>>
+);
 
 type UpdateInfo = {
   currentVersion: string;
@@ -210,6 +221,15 @@ function appendManualUpgradeHint() {
   appendUpgradeLog(`[ForwardX] Local: ${MANUAL_LOCAL_UPGRADE_COMMAND}`);
   appendUpgradeLog(`[ForwardX] Docker: ${MANUAL_DOCKER_UPGRADE_COMMAND}`);
 }
+
+function parseForwardProtocolSettings(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 export const systemRouter = router({
   health: publicProcedure.query(() => {
     return { status: "ok", timestamp: new Date().toISOString() };
@@ -236,6 +256,9 @@ export const systemRouter = router({
       homepageEnabled: all.homepageEnabled !== "false",
       homepageCustomEnabled: all.homepageCustomEnabled === "true",
       homepageHtml: all.homepageHtml ?? "",
+      forwardProtocols: normalizeForwardProtocolSettings(
+        parseForwardProtocolSettings(all.forwardProtocols),
+      ),
       database: {
         type: all.databaseType || (all.mysqlConfigured === "true" ? "mysql" : "sqlite"),
         configured: Boolean(all.databaseConfigured || all.mysqlConfigured),
@@ -293,6 +316,7 @@ export const systemRouter = router({
         homepageEnabled: z.boolean().optional(),
         homepageCustomEnabled: z.boolean().optional(),
         homepageHtml: z.string().max(60000).optional(),
+        forwardProtocols: forwardProtocolSettingsSchema.optional(),
         email: z.object({
           enabled: z.boolean().optional(),
           host: z.string().max(256).optional(),
@@ -338,6 +362,15 @@ export const systemRouter = router({
       if (input.homepageHtml !== undefined) {
         await db.setSetting("homepageHtml", input.homepageHtml.trim() || null);
         console.info("[Settings] custom homepage html updated");
+      }
+      if (input.forwardProtocols !== undefined) {
+        const normalized = normalizeForwardProtocolSettings(input.forwardProtocols);
+        await db.setSetting("forwardProtocols", JSON.stringify(normalized));
+        const hosts = await db.getHosts();
+        for (const host of hosts as any[]) {
+          pushAgentRefresh(host.id, "forward-protocol-settings-updated");
+        }
+        console.info("[Settings] forward protocol switches updated");
       }
       if (input.email) {
         const email = input.email;

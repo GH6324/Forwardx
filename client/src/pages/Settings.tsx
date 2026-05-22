@@ -28,6 +28,13 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import {
+  FORWARD_PROTOCOL_LABELS,
+  FORWARD_TYPES,
+  TUNNEL_PROTOCOLS,
+  normalizeForwardProtocolSettings,
+  type ForwardProtocolSettings,
+} from "@shared/forwardTypes";
+import {
   Plus,
   Trash2,
   Key,
@@ -118,6 +125,9 @@ const manualPanelUpgradeCommands = [
       "curl -fsSL https://raw.githubusercontent.com/poouo/Forwardx/main/scripts/install-panel-docker.sh | sudo bash -s -- upgrade",
   },
 ];
+
+const directForwardProtocolKeys = [...FORWARD_TYPES] as const;
+const tunnelForwardProtocolKeys = [...TUNNEL_PROTOCOLS] as const;
 
 const defaultHomepageHtml = `<!doctype html>
 <html lang="zh-CN">
@@ -1227,6 +1237,7 @@ function SystemInfoSection() {
   const [homepageEnabled, setHomepageEnabled] = useState(true);
   const [homepageCustomEnabled, setHomepageCustomEnabled] = useState(false);
   const [homepageHtml, setHomepageHtml] = useState("");
+  const [forwardProtocols, setForwardProtocols] = useState<ForwardProtocolSettings>(() => normalizeForwardProtocolSettings());
   const [migrationCode, setMigrationCode] = useState<{
     code: string;
     expiresAt: number;
@@ -1253,6 +1264,7 @@ function SystemInfoSection() {
       setHomepageEnabled(settings.homepageEnabled ?? true);
       setHomepageCustomEnabled(!!settings.homepageCustomEnabled);
       setHomepageHtml(settings.homepageHtml || "");
+      setForwardProtocols(normalizeForwardProtocolSettings(settings.forwardProtocols));
     }
   }, [settings]);
 
@@ -1298,6 +1310,14 @@ function SystemInfoSection() {
 
   const handleSaveHomepage = () => {
     updateSettingsMutation.mutate({ homepageEnabled, homepageCustomEnabled, homepageHtml });
+  };
+
+  const handleSaveForwardProtocols = () => {
+    updateSettingsMutation.mutate({ forwardProtocols });
+  };
+
+  const setForwardProtocolEnabled = (key: keyof ForwardProtocolSettings, enabled: boolean) => {
+    setForwardProtocols((prev) => ({ ...prev, [key]: enabled }));
   };
 
   const handlePreviewHomepage = () => {
@@ -1435,6 +1455,55 @@ function SystemInfoSection() {
           <p className="text-xs text-muted-foreground">
             留空使用面板访问请求中的 host 作为默认值。必须以 http:// 或 https:// 开头。
           </p>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/40 bg-card/60 backdrop-blur-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            转发协议总开关
+          </CardTitle>
+          <CardDescription>
+            关闭后用户无法创建、启用或操作对应协议；已存在的规则会停止转发但保留配置，重新开启后会按原规则自动恢复。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium">端口转发</p>
+                <p className="text-xs text-muted-foreground">控制规则中的 iptables、realm、socat、gost 转发工具。</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {directForwardProtocolKeys.map((key) => (
+                  <div key={key} className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-background/60 px-3 py-2">
+                    <span className="text-sm">{FORWARD_PROTOCOL_LABELS[key]}</span>
+                    <Switch checked={forwardProtocols[key]} onCheckedChange={(checked) => setForwardProtocolEnabled(key, checked)} />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium">隧道协议</p>
+                <p className="text-xs text-muted-foreground">控制隧道管理中的 ForwardX 与 GOST 隧道模式。</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {tunnelForwardProtocolKeys.map((key) => (
+                  <div key={key} className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-background/60 px-3 py-2">
+                    <span className="text-sm">{FORWARD_PROTOCOL_LABELS[key]}</span>
+                    <Switch checked={forwardProtocols[key]} onCheckedChange={(checked) => setForwardProtocolEnabled(key, checked)} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={handleSaveForwardProtocols} disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? "保存中..." : "保存协议开关"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

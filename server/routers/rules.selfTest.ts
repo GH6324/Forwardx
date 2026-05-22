@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as db from "../db";
 import { appendPanelLog } from "../_core/panelLogger";
 import { pushTunnelEndpointRefresh } from "./helpers";
+import { requireRuleProtocolEnabled } from "../forwardProtocolSettings";
 
 export const selfTestRulesRouter = router({
   tcpingSeries: protectedProcedure
@@ -28,6 +29,7 @@ export const selfTestRulesRouter = router({
       if (ctx.user.role !== "admin" && rule.userId !== ctx.user.id) {
         throw new Error("无权操作此规则");
       }
+      await requireRuleProtocolEnabled(rule);
       let hostId = rule.hostId;
       let message: string | null = null;
       if ((rule as any).tunnelId) {

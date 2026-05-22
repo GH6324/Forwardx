@@ -4,6 +4,7 @@ import * as db from "../db";
 import { pushAgentRefresh } from "../agentEvents";
 import { forwardTypeSchema } from "./schemas";
 import { pushTunnelEndpointRefresh, requireTunnelUseAccess } from "./helpers";
+import { requireRuleProtocolEnabled } from "../forwardProtocolSettings";
 
 export const crudRulesRouter = router({
   create: protectedProcedure
@@ -80,6 +81,7 @@ export const crudRulesRouter = router({
           throw new Error("No permission to use custom encrypted tunnels");
         }
       }
+      await requireRuleProtocolEnabled({ forwardType: input.forwardType, tunnelId }, selectedTunnelForRule);
       const entryRangeStart = selectedTunnelForRule ? (selectedTunnelForRule as any).portRangeStart : (host as any).portRangeStart;
       const entryRangeEnd = selectedTunnelForRule ? (selectedTunnelForRule as any).portRangeEnd : (host as any).portRangeEnd;
       const planRange = ctx.user.role !== "admin"
@@ -161,12 +163,15 @@ export const crudRulesRouter = router({
       const rule = await db.getForwardRuleById(input.id);
       if (!rule) throw new Error("规则不存在");
       if (ctx.user.role !== "admin" && rule.userId !== ctx.user.id) throw new Error("无权操作此规则");
+      await requireRuleProtocolEnabled(rule);
 
       // 如果修改了源端口，检查端口区间和占用
       let selectedTunnelForRule: any = null;
       let nextTunnelIdForRule: number | null = null;
+      let nextForwardTypeForRule = rule.forwardType;
       {
         const nextForwardType = input.forwardType ?? rule.forwardType;
+        nextForwardTypeForRule = nextForwardType;
         const nextGostMode = input.gostMode ?? (rule as any).gostMode ?? "direct";
         nextTunnelIdForRule = nextForwardType === "gost" && nextGostMode === "direct"
           ? (input.tunnelId !== undefined ? input.tunnelId : (rule as any).tunnelId)
@@ -185,6 +190,7 @@ export const crudRulesRouter = router({
           }
         }
       }
+      await requireRuleProtocolEnabled({ ...rule, forwardType: nextForwardTypeForRule, tunnelId: nextTunnelIdForRule }, selectedTunnelForRule);
 
       if (input.sourcePort && input.sourcePort !== rule.sourcePort) {
         const host = await db.getHostById(rule.hostId);
@@ -296,6 +302,7 @@ export const crudRulesRouter = router({
       const rule = await db.getForwardRuleById(input.id);
       if (!rule) throw new Error("规则不存在");
       if (ctx.user.role !== "admin" && rule.userId !== ctx.user.id) throw new Error("无权操作此规则");
+      await requireRuleProtocolEnabled(rule);
       if ((rule as any).tunnelId) {
         const tunnel = await db.getTunnelById((rule as any).tunnelId);
         await db.updateTunnel((rule as any).tunnelId, { isRunning: false } as any);

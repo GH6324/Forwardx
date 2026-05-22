@@ -5,6 +5,7 @@ import * as db from "../db";
 import { appendPanelLog } from "../_core/panelLogger";
 import { pushAgentRefresh } from "../agentEvents";
 import { pushTunnelEndpointRefresh, requireHostAccess } from "./helpers";
+import { requireTunnelProtocolEnabled } from "../forwardProtocolSettings";
 
 export const tunnelsRouter = router({
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -43,6 +44,7 @@ export const tunnelsRouter = router({
         const entry = await requireHostAccess(ctx, input.entryHostId);
         const exit = await requireHostAccess(ctx, input.exitHostId);
         if (!entry || !exit) throw new Error("主机不存在");
+        await requireTunnelProtocolEnabled(input);
         let listenPort = Number(input.listenPort) || 0;
         if (listenPort > 0) {
           const start = (exit as any).portRangeStart;
@@ -83,6 +85,7 @@ export const tunnelsRouter = router({
         const tunnel = await db.getTunnelById(input.id);
         if (!tunnel) throw new Error("隧道不存在");
         if (ctx.user.role !== "admin" && tunnel.userId !== ctx.user.id) throw new Error("无权操作此隧道");
+        await requireTunnelProtocolEnabled({ ...tunnel, mode: input.mode ?? tunnel.mode });
         const entryHostId = input.entryHostId ?? tunnel.entryHostId;
         const exitHostId = input.exitHostId ?? tunnel.exitHostId;
         if (entryHostId === exitHostId) throw new Error("入口 Agent 和出口 Agent 不能相同");
@@ -151,6 +154,7 @@ export const tunnelsRouter = router({
         const tunnel = await db.getTunnelById(input.id);
         if (!tunnel) throw new Error("Tunnel not found");
         if (ctx.user.role !== "admin" && tunnel.userId !== ctx.user.id) throw new Error("No permission to test this tunnel");
+        await requireTunnelProtocolEnabled(tunnel);
         const entry = await db.getHostById(tunnel.entryHostId);
         const exit = await db.getHostById(tunnel.exitHostId);
         if (!entry) throw new Error("Entry Agent not found");

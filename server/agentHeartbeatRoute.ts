@@ -4,6 +4,11 @@ import { AGENT_VERSION } from "./_core/systemRouter";
 import { isHostMetricsWatching } from "./agentEvents";
 import { compareVersions, parseSelfTestMeta, tunnelSecretSeed } from "./agentRouteUtils";
 import { resolvePanelUrl } from "./agentPanelUrl";
+import {
+  getForwardProtocolSettings,
+  isRuleProtocolEnabled,
+  isTunnelProtocolEnabled,
+} from "./forwardProtocolSettings";
 
 export function registerAgentHeartbeatRoute(agentRouter: Router) {
 agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => {
@@ -53,6 +58,7 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     // 获取该主机的转发规则
     const rules = await db.getForwardRulesForAgent(host.id);
     const hostTunnels = await db.getTunnelsByHost(host.id);
+    const forwardProtocolSettings = await getForwardProtocolSettings();
     const actions: any[] = [];
 
     // 获取主机配置的网卡名称（用于 realm --interface）
@@ -138,9 +144,14 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     ].join("\n");
     const agentHostRules = await db.getForwardRulesForAgent(host.id);
     const agentAllRules = await db.getForwardRulesForAgent(undefined);
+    const tunnelById = new Map((hostTunnels as any[]).map((t: any) => [t.id, t]));
     const gostRules = agentHostRules
-      .filter((r: any) => !r.pendingDelete && r.isEnabled && r.forwardType === "gost");
-    const gostRuleUserIds = Array.from(new Set(agentHostRules.map((r: any) => Number(r.userId)).filter((id: number) => Number.isFinite(id) && id > 0)));
+      .filter((r: any) => {
+        if (r.pendingDelete || !r.isEnabled || r.forwardType !== "gost") return false;
+        const tunnel = (r as any).tunnelId ? tunnelById.get((r as any).tunnelId) as any : null;
+        return isRuleProtocolEnabled(forwardProtocolSettings, r, tunnel);
+      });
+    const gostRuleUserIds = Array.from(new Set(agentHostRules.map((r: any) => Number(r.userId)).filter((id: number) => Number.isFinite(id) && id > 0))) as number[];
     const gostUsers = await Promise.all(gostRuleUserIds.map((id) => db.getUserById(id)));
     const gostUserById = new Map(gostUsers.filter(Boolean).map((u: any) => [u.id, u]));
     const gostRateLimiters = gostUsers
@@ -198,7 +209,6 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
       cmds.push(`iptables -C FORWARD -p tcp --dport ${port} -j ${chain} 2>/dev/null || iptables -I FORWARD -p tcp --dport ${port} -j ${chain}`);
       return cmds;
     };
-    const tunnelById = new Map((hostTunnels as any[]).map((t: any) => [t.id, t]));
     const accessScopeForRule = (rule: any) => (
       rule.tunnelId
         ? `u${Number(rule.userId) || 0}_t${Number(rule.tunnelId) || 0}`
@@ -223,12 +233,12 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     };
     const tunnelExitHostById = new Map<number, string>();
     for (const tunnel of hostTunnels as any[]) {
-      if (tunnel.entryHostId === host.id && tunnel.isEnabled) {
+      if (tunnel.entryHostId === host.id && tunnel.isEnabled && isTunnelProtocolEnabled(forwardProtocolSettings, tunnel)) {
         tunnelExitHostById.set(tunnel.id, await tunnelExitHostAddress(tunnel));
       }
     }
     const tunnelProbes = (hostTunnels as any[])
-      .filter((tunnel: any) => tunnel.entryHostId === host.id && tunnel.isEnabled)
+      .filter((tunnel: any) => tunnel.entryHostId === host.id && tunnel.isEnabled && isTunnelProtocolEnabled(forwardProtocolSettings, tunnel))
       .map((tunnel: any) => ({
         tunnelId: tunnel.id,
         targetIp: tunnelExitHostById.get(tunnel.id) || "",
@@ -240,7 +250,11 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
       .filter((r: any) => {
         if (r.pendingDelete || !r.isEnabled || r.forwardType !== "gost" || !r.tunnelId) return false;
         const tunnel = tunnelById.get(r.tunnelId) as any;
-        return !!tunnel && tunnel.isEnabled && tunnel.exitHostId === host.id;
+        return !!tunnel
+          && tunnel.isEnabled
+          && isTunnelProtocolEnabled(forwardProtocolSettings, tunnel)
+          && isRuleProtocolEnabled(forwardProtocolSettings, r, tunnel)
+          && tunnel.exitHostId === host.id;
       });
 
     const gostServiceConfig = gostRules
@@ -349,7 +363,7 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     };
     const buildTunnelReloadCmds = () => {
       const tunnelProbeServices = hostTunnels
-        .filter((tunnel: any) => tunnel.exitHostId === host.id && tunnel.isEnabled && !isForwardXTunnel(tunnel))
+        .filter((tunnel: any) => tunnel.exitHostId === host.id && tunnel.isEnabled && !isForwardXTunnel(tunnel) && isTunnelProtocolEnabled(forwardProtocolSettings, tunnel))
         .map((tunnel: any) => ({
           name: `fwx-tunnel-probe-${tunnel.id}`,
           addr: `:${tunnel.listenPort}`,
@@ -431,6 +445,118 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     };
     const runningRules: { ruleId: number; sourcePort: number; targetIp: string; targetPort: number; protocol: string; forwardType: string }[] = [];
 
+    const buildDisabledRuleRemovalAction = (rule: any) => {
+      const tunnel = (rule as any).tunnelId ? tunnelById.get((rule as any).tunnelId) as any : null;
+      if (rule.forwardType === "iptables") {
+        const proto = rule.protocol === "both" ? "tcp" : rule.protocol;
+        const cmds: string[] = [];
+        cmds.push(`iptables -t nat -D PREROUTING -p ${proto} --dport ${rule.sourcePort} -j DNAT --to-destination ${rule.targetIp}:${rule.targetPort} 2>/dev/null || true`);
+        cmds.push(`iptables -t nat -D POSTROUTING -p ${proto} -d ${rule.targetIp} --dport ${rule.targetPort} -j MASQUERADE 2>/dev/null || true`);
+        if (rule.protocol === "both") {
+          cmds.push(`iptables -t nat -D PREROUTING -p udp --dport ${rule.sourcePort} -j DNAT --to-destination ${rule.targetIp}:${rule.targetPort} 2>/dev/null || true`);
+          cmds.push(`iptables -t nat -D POSTROUTING -p udp -d ${rule.targetIp} --dport ${rule.targetPort} -j MASQUERADE 2>/dev/null || true`);
+        }
+        cmds.push(`iptables -D FORWARD -p ${proto} -d ${rule.targetIp} --dport ${rule.targetPort} -j ACCEPT 2>/dev/null || true`);
+        cmds.push(`iptables -D FORWARD -p ${proto} -s ${rule.targetIp} --sport ${rule.targetPort} -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true`);
+        cmds.push(`rm -f /var/lib/forwardx-agent/traffic_${rule.sourcePort}.prev 2>/dev/null || true`);
+        cmds.push(`rm -f /var/lib/forwardx-agent/port_${rule.sourcePort}.rule 2>/dev/null || true`);
+        cmds.push(...buildCountingCleanupCmds(rule.sourcePort));
+        cmds.push(...buildAccessLimitCleanupCmds(rule.sourcePort, accessScopeForRule(rule)));
+        return {
+          ruleId: rule.id,
+          op: "remove",
+          forwardType: rule.forwardType,
+          sourcePort: rule.sourcePort,
+          targetIp: rule.targetIp,
+          targetPort: rule.targetPort,
+          protocol: rule.protocol,
+          commands: cmds,
+        };
+      }
+      if (rule.forwardType === "realm") {
+        const svcName = `forwardx-realm-${rule.sourcePort}`;
+        return {
+          ruleId: rule.id,
+          op: "remove",
+          forwardType: rule.forwardType,
+          sourcePort: rule.sourcePort,
+          targetIp: rule.targetIp,
+          targetPort: rule.targetPort,
+          protocol: rule.protocol,
+          svcName,
+          commands: [
+            `systemctl stop ${svcName}.service 2>/dev/null || true`,
+            `systemctl disable ${svcName}.service 2>/dev/null || true`,
+            `rm -f /etc/systemd/system/${svcName}.service`,
+            `systemctl daemon-reload`,
+            `pkill -f "realm .*:${rule.sourcePort}" 2>/dev/null || true`,
+            `rm -f /var/lib/forwardx-agent/traffic_${rule.sourcePort}.prev 2>/dev/null || true`,
+            `rm -f /var/lib/forwardx-agent/port_${rule.sourcePort}.rule 2>/dev/null || true`,
+            ...buildCountingCleanupCmds(rule.sourcePort),
+            ...buildAccessLimitCleanupCmds(rule.sourcePort, accessScopeForRule(rule)),
+          ],
+        };
+      }
+      if (rule.forwardType === "socat") {
+        const removeCmds: string[] = [];
+        if (rule.protocol === "both") {
+          const svcTcp = `forwardx-socat-tcp-${rule.sourcePort}`;
+          const svcUdp = `forwardx-socat-udp-${rule.sourcePort}`;
+          removeCmds.push(`systemctl stop ${svcTcp}.service 2>/dev/null || true`);
+          removeCmds.push(`systemctl disable ${svcTcp}.service 2>/dev/null || true`);
+          removeCmds.push(`rm -f /etc/systemd/system/${svcTcp}.service`);
+          removeCmds.push(`systemctl stop ${svcUdp}.service 2>/dev/null || true`);
+          removeCmds.push(`systemctl disable ${svcUdp}.service 2>/dev/null || true`);
+          removeCmds.push(`rm -f /etc/systemd/system/${svcUdp}.service`);
+        } else {
+          const svcName = `forwardx-socat-${rule.sourcePort}`;
+          removeCmds.push(`systemctl stop ${svcName}.service 2>/dev/null || true`);
+          removeCmds.push(`systemctl disable ${svcName}.service 2>/dev/null || true`);
+          removeCmds.push(`rm -f /etc/systemd/system/${svcName}.service`);
+        }
+        removeCmds.push(`systemctl daemon-reload`);
+        removeCmds.push(`pkill -f "socat.*LISTEN:${rule.sourcePort}" 2>/dev/null || true`);
+        removeCmds.push(`rm -f /var/lib/forwardx-agent/traffic_${rule.sourcePort}.prev 2>/dev/null || true`);
+        removeCmds.push(`rm -f /var/lib/forwardx-agent/port_${rule.sourcePort}.rule 2>/dev/null || true`);
+        removeCmds.push(...buildCountingCleanupCmds(rule.sourcePort));
+        removeCmds.push(...buildAccessLimitCleanupCmds(rule.sourcePort, accessScopeForRule(rule)));
+        return {
+          ruleId: rule.id,
+          op: "remove",
+          forwardType: rule.forwardType,
+          sourcePort: rule.sourcePort,
+          targetIp: rule.targetIp,
+          targetPort: rule.targetPort,
+          protocol: rule.protocol,
+          commands: removeCmds,
+        };
+      }
+      if (rule.forwardType === "gost") {
+        return {
+          ruleId: rule.id,
+          op: "remove",
+          forwardType: rule.forwardType,
+          sourcePort: rule.sourcePort,
+          targetIp: rule.targetIp,
+          targetPort: rule.targetPort,
+          protocol: rule.protocol,
+          commands: [
+            ...buildGostReloadCmds(),
+            ...buildManagedPortCleanupCmds(rule.sourcePort),
+          ],
+          fxp: tunnel && isForwardXTunnel(tunnel) ? {
+            role: "entry",
+            tunnelId: tunnel.id,
+            ruleId: rule.id,
+            listenPort: rule.sourcePort,
+            protocol: rule.protocol,
+            key: tunnelSecretSeed(tunnel),
+          } : undefined,
+        };
+      }
+      return null;
+    };
+
     const pendingTunnelExitRuleIds = new Set(
       tunnelExitRules
         .filter((rule: any) => !rule.isRunning)
@@ -442,7 +568,8 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
       const shouldRefreshExit = fxpTunnel
         ? !tunnel.isRunning
         : (!tunnel.isRunning || pendingTunnelExitRuleIds.has(Number(tunnel.id)));
-      if (tunnel.isEnabled && shouldRefreshExit) {
+      const tunnelProtocolEnabled = isTunnelProtocolEnabled(forwardProtocolSettings, tunnel);
+      if (tunnel.isEnabled && tunnelProtocolEnabled && shouldRefreshExit) {
         actions.push({
           tunnelId: tunnel.id,
           statusType: "tunnel",
@@ -463,7 +590,7 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
             key: tunnelSecretSeed(tunnel),
           } : undefined,
         });
-      } else if (!tunnel.isEnabled && tunnel.isRunning) {
+      } else if ((!tunnel.isEnabled || !tunnelProtocolEnabled) && tunnel.isRunning) {
         actions.push({
           tunnelId: tunnel.id,
           statusType: "tunnel",
@@ -488,6 +615,15 @@ agentRouter.post("/api/agent/heartbeat", async (req: Request, res: Response) => 
     }
 
     for (const rule of rules) {
+      const ruleTunnel = (rule as any).tunnelId ? tunnelById.get((rule as any).tunnelId) as any : null;
+      const ruleProtocolEnabled = isRuleProtocolEnabled(forwardProtocolSettings, rule, ruleTunnel);
+      if (!ruleProtocolEnabled) {
+        if (rule.isRunning) {
+          const removeAction = buildDisabledRuleRemovalAction(rule);
+          if (removeAction) actions.push(removeAction);
+        }
+        continue;
+      }
       // 收集所有已运行的规则映射（无论是否有 action 下发）
       if (rule.isEnabled && rule.isRunning) {
         const trafficPort = ruleTrafficPort(rule);

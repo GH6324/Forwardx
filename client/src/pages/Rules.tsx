@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -52,8 +53,15 @@ import {
   Copy,
   Network,
 } from "lucide-react";
-import { FORWARD_TYPES, FORWARD_TYPE_LABELS, type ForwardType } from "@shared/forwardTypes";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import {
+  FORWARD_TYPES,
+  FORWARD_TYPE_LABELS,
+  FORWARD_PROTOCOL_LABELS,
+  normalizeForwardProtocolSettings,
+  type ForwardType,
+  type ForwardProtocolKey,
+} from "@shared/forwardTypes";
+import { useState, useMemo, useEffect, useCallback, type ReactNode } from "react";
 import { toast } from "sonner";
 import { TcpingDetailDialog } from "@/components/rules/TcpingDetailDialog";
 
@@ -100,6 +108,7 @@ const defaultForm: RuleFormData = {
 };
 
 const gostTunnelModes = new Set(["tls", "wss", "tcp", "mtls", "mwss", "mtcp"]);
+const unsupportedProtocolTitle = "当前不支持，请联系管理员";
 
 function getTunnelDisplay(tunnel: any | null | undefined) {
   const mode = String(tunnel?.mode || "").toLowerCase();
@@ -144,6 +153,7 @@ function RulesContent() {
   });
   const { data: hosts } = trpc.hosts.list.useQuery();
   const { data: tunnels } = trpc.tunnels.list.useQuery();
+  const { data: systemSettings } = trpc.system.getSettings.useQuery();
 
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -225,11 +235,17 @@ function RulesContent() {
   const [selfTestRule, setSelfTestRule] = useState<{ id: number; name: string } | null>(null);
 
   const setRouteMode = (mode: "local" | "tunnel") => {
+    if (mode === "local" && !canUseLocalForward) return;
     if (mode === "tunnel" && !canUseGost) return;
+    if (mode === "tunnel" && availableTunnels.length === 0) return;
+    const nextForwardType = mode === "tunnel"
+      ? "gost"
+      : (usableForwardTypes.includes(form.forwardType) ? form.forwardType : usableForwardTypes[0]);
+    if (!nextForwardType) return;
     setForm((prev) => ({
       ...prev,
       routeMode: mode,
-      forwardType: mode === "tunnel" ? "gost" : prev.forwardType,
+      forwardType: nextForwardType,
       gostMode: "direct",
       gostRelayHost: mode === "tunnel" ? "" : prev.gostRelayHost,
       gostRelayPort: mode === "tunnel" ? 0 : prev.gostRelayPort,
@@ -253,13 +269,24 @@ function RulesContent() {
 
   const openCreate = () => {
     resetForm();
+    const firstForwardType = usableForwardTypes[0];
+    const firstTunnel = canUseGost
+      ? supportedTunnels[0]
+      : null;
     if (hosts && hosts.length > 0) {
-      setForm({ ...defaultForm, hostId: hosts[0].id });
+      setForm({
+        ...defaultForm,
+        routeMode: firstForwardType ? "local" : firstTunnel ? "tunnel" : "local",
+        hostId: firstForwardType ? hosts[0].id : firstTunnel ? firstTunnel.entryHostId : hosts[0].id,
+        forwardType: firstForwardType ?? "gost",
+        tunnelId: firstTunnel && !firstForwardType ? firstTunnel.id : null,
+      });
     }
     setShowDialog(true);
   };
 
   const openEdit = (rule: any) => {
+    if (!isRuleSupported(rule)) return;
     setForm({
       hostId: rule.hostId,
       name: rule.name,
@@ -296,12 +323,37 @@ function RulesContent() {
     if (!form.hostId || !hosts) return null;
     return hosts.find(h => h.id === form.hostId) || null;
   }, [form.hostId, hosts]);
+  const forwardProtocolSettings = useMemo(
+    () => normalizeForwardProtocolSettings(systemSettings?.forwardProtocols),
+    [systemSettings?.forwardProtocols]
+  );
+  const isProtocolEnabled = useCallback((key: ForwardProtocolKey | null | undefined) => {
+    if (!key) return true;
+    return forwardProtocolSettings[key] !== false;
+  }, [forwardProtocolSettings]);
+  const getTunnelProtocolKey = useCallback((tunnel: any | null | undefined): ForwardProtocolKey | null => {
+    const mode = String(tunnel?.mode || "").toLowerCase();
+    return (["forwardx", "tls", "wss", "tcp", "mtls", "mwss", "mtcp"] as const).includes(mode as any)
+      ? mode as ForwardProtocolKey
+      : null;
+  }, []);
+  const getRuleProtocolKey = useCallback((rule: any): ForwardProtocolKey | null => {
+    if (rule.forwardType === "gost" && rule.tunnelId) {
+      const tunnel = tunnels?.find((t: any) => Number(t.id) === Number(rule.tunnelId));
+      return getTunnelProtocolKey(tunnel);
+    }
+    return rule.forwardType as ForwardProtocolKey;
+  }, [getTunnelProtocolKey, tunnels]);
+  const isRuleSupported = useCallback((rule: any) => isProtocolEnabled(getRuleProtocolKey(rule)), [getRuleProtocolKey, isProtocolEnabled]);
+  const supportedTunnels = useMemo(
+    () => (tunnels || []).filter((t: any) => isProtocolEnabled(getTunnelProtocolKey(t))),
+    [getTunnelProtocolKey, isProtocolEnabled, tunnels]
+  );
   const availableTunnels = useMemo(() => {
-    if (!tunnels) return [];
-    if (form.routeMode === "tunnel") return tunnels;
+    if (form.routeMode === "tunnel") return supportedTunnels;
     if (!form.hostId) return [];
-    return tunnels.filter((t: any) => t.entryHostId === form.hostId);
-  }, [form.hostId, form.routeMode, tunnels]);
+    return supportedTunnels.filter((t: any) => t.entryHostId === form.hostId);
+  }, [form.hostId, form.routeMode, supportedTunnels]);
   const selectedTunnel = useMemo(() => {
     if (!form.tunnelId || !tunnels) return null;
     return tunnels.find((t: any) => t.id === form.tunnelId) || null;
@@ -312,6 +364,30 @@ function RulesContent() {
     (tunnels || []).forEach((t: any) => map.set(Number(t.id), getTunnelDisplay(t)));
     return map;
   }, [tunnels]);
+  /**
+   * 当前用户被允许使用的转发方式。
+   * - 管理员：不受限制（返回全部）
+   * - 普通用户：读 (user as any).allowedForwardTypes，空表示全部
+   */
+  const allowedForwardTypes: ForwardType[] = useMemo(() => {
+    const all = [...FORWARD_TYPES];
+    if (!user || user.role === "admin") return all;
+    const raw = (user as any).allowedForwardTypes as string | null | undefined;
+    if (!raw || !raw.trim()) return all;
+    const set = new Set(raw.split(",").map((s: string) => s.trim()));
+    const filtered = all.filter(t => set.has(t));
+    return filtered.length > 0 ? filtered : all;
+  }, [user]);
+  const usableForwardTypes = useMemo(
+    () => allowedForwardTypes.filter((t) => isProtocolEnabled(t)),
+    [allowedForwardTypes, isProtocolEnabled]
+  );
+  const canUseLocalForward = usableForwardTypes.length > 0;
+  const canUseGost = allowedForwardTypes.includes("gost") && supportedTunnels.length > 0;
+  const activeCount = useMemo(
+    () => rules?.filter((r) => r.isEnabled && isRuleSupported(r)).length ?? 0,
+    [isRuleSupported, rules]
+  );
 
   const [portRangeError, setPortRangeError] = useState<string | null>(null);
 
@@ -356,6 +432,14 @@ function RulesContent() {
     }
   }, [form.sourcePort, form.hostId, checkPort]);
 
+  useEffect(() => {
+    if (form.routeMode !== "local") return;
+    if (usableForwardTypes.length === 0) return;
+    if (!usableForwardTypes.includes(form.forwardType)) {
+      setForm((prev) => ({ ...prev, forwardType: usableForwardTypes[0], gostMode: usableForwardTypes[0] === "gost" ? prev.gostMode : "direct", tunnelId: null }));
+    }
+  }, [form.forwardType, form.routeMode, usableForwardTypes]);
+
   // 随机分配端口
   const handleRandomPort = async () => {
     if (!form.hostId) {
@@ -383,6 +467,14 @@ function RulesContent() {
     }
     if (form.routeMode === "tunnel" && !form.tunnelId) {
       toast.error("请选择要使用的隧道");
+      return;
+    }
+    if (form.routeMode === "local" && !isProtocolEnabled(form.forwardType)) {
+      toast.error(unsupportedProtocolTitle);
+      return;
+    }
+    if (form.routeMode === "tunnel" && !isProtocolEnabled(getTunnelProtocolKey(selectedTunnel))) {
+      toast.error(unsupportedProtocolTitle);
       return;
     }
     if (!isValidPort(form.sourcePort, !editingId)) {
@@ -447,27 +539,9 @@ function RulesContent() {
     });
   }, [rules, filterHost, filterType]);
 
-  const activeCount = useMemo(() => rules?.filter((r) => r.isEnabled).length ?? 0, [rules]);
-
   const getHostName = (hostId: number) => {
     return hosts?.find((h) => h.id === hostId)?.name || `主机 #${hostId}`;
   };
-
-  /**
-   * 当前用户被允许使用的转发方式。
-   * - 管理员：不受限制（返回全部）
-   * - 普通用户：读 (user as any).allowedForwardTypes，空表示全部
-   */
-  const allowedForwardTypes: ForwardType[] = useMemo(() => {
-    const all = [...FORWARD_TYPES];
-    if (!user || user.role === "admin") return all;
-    const raw = (user as any).allowedForwardTypes as string | null | undefined;
-    if (!raw || !raw.trim()) return all;
-    const set = new Set(raw.split(",").map((s: string) => s.trim()));
-    const filtered = all.filter(t => set.has(t));
-    return filtered.length > 0 ? filtered : all;
-  }, [user]);
-  const canUseGost = allowedForwardTypes.includes("gost");
 
   /** 获取主机的入口地址：优先用用户自定义的 entryIp，未填则回退 ip */
   const getHostEntry = (hostId: number): string => {
@@ -561,6 +635,15 @@ function RulesContent() {
     </Badge>
   );
 
+  const renderUnsupportedHint = (children: ReactNode) => (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent>{unsupportedProtocolTitle}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+
   const renderRuleTraffic = (rule: any) => {
     const t = trafficByRule.get(rule.id);
     if (!t || (t.bytesIn === 0 && t.bytesOut === 0)) {
@@ -578,44 +661,66 @@ function RulesContent() {
     );
   };
 
-  const renderRuleActions = (rule: any) => (
-    <div className="flex items-center justify-end gap-1">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8"
-        onClick={() => setTrafficDetailRule({ id: rule.id, name: rule.name })}
-        title="查看 TCPing 延迟"
-      >
-        <Activity className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8"
-        onClick={() => setSelfTestRule({ id: rule.id, name: rule.name })}
-        title="转发链路自测"
-      >
-        <Stethoscope className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8"
-        onClick={() => openEdit(rule)}
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 text-destructive hover:text-destructive"
-        onClick={() => setDeleteRule(rule)}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
-    </div>
-  );
+  const renderRuleActions = (rule: any) => {
+    const supported = isRuleSupported(rule);
+    if (!supported) {
+      return (
+        <div className="flex items-center justify-end gap-1">
+          {renderUnsupportedHint(
+            <span className="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                onClick={() => setDeleteRule(rule)}
+                title={unsupportedProtocolTitle}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center justify-end gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => setTrafficDetailRule({ id: rule.id, name: rule.name })}
+          title="查看 TCPing 延迟"
+        >
+          <Activity className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => setSelfTestRule({ id: rule.id, name: rule.name })}
+          title="转发链路自测"
+        >
+          <Stethoscope className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => openEdit(rule)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-destructive hover:text-destructive"
+          onClick={() => setDeleteRule(rule)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -632,7 +737,7 @@ function RulesContent() {
             {activeCount} / {rules?.length ?? 0} 活跃
           </Badge>
           {canAdd ? (
-            <Button onClick={openCreate} className="gap-2" disabled={!hosts || hosts.length === 0}>
+            <Button onClick={openCreate} className="gap-2" disabled={!hosts || hosts.length === 0 || (usableForwardTypes.length === 0 && !canUseGost)}>
               <Plus className="h-4 w-4" />
               添加规则
             </Button>
@@ -726,23 +831,39 @@ function RulesContent() {
           ) : filteredRules.length > 0 ? (
             <>
               <div className="grid gap-3 p-3 lg:hidden">
-                {filteredRules.map((rule) => (
-                  <div key={rule.id} className="rounded-lg border border-border/50 bg-background/65 p-3 shadow-sm">
+                {filteredRules.map((rule) => {
+                  const supported = isRuleSupported(rule);
+                  const protocolKey = getRuleProtocolKey(rule);
+                  return (
+                  <div
+                    key={rule.id}
+                    className={`rounded-lg border border-border/50 bg-background/65 p-3 shadow-sm ${!supported ? "opacity-70" : ""}`}
+                    title={!supported ? unsupportedProtocolTitle : undefined}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-2">
                         <div className="mt-2 flex h-4 w-4 flex-shrink-0 items-center justify-center">
-                          {renderStatusDot(rule)}
+                          {supported ? renderStatusDot(rule) : <span className="h-2.5 w-2.5 rounded-full bg-destructive/60" />}
                         </div>
                         <div className="min-w-0">
                           <div className="truncate font-medium">{rule.name}</div>
                           <div className="mt-1 text-xs text-muted-foreground">{getHostName(rule.hostId)}</div>
+                          {!supported && (
+                            <div className="mt-1 text-[11px] text-destructive">
+                              {protocolKey ? FORWARD_PROTOCOL_LABELS[protocolKey] : "该协议"} 当前不支持
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <Switch
-                        checked={rule.isEnabled}
-                        onCheckedChange={(checked) => toggleMutation.mutate({ id: rule.id, isEnabled: checked })}
-                        className="scale-75"
-                      />
+                      {supported ? (
+                        <Switch
+                          checked={rule.isEnabled}
+                          onCheckedChange={(checked) => toggleMutation.mutate({ id: rule.id, isEnabled: checked })}
+                          className="scale-75"
+                        />
+                      ) : (
+                        renderUnsupportedHint(<span className="inline-flex"><Switch checked={false} disabled className="scale-75" /></span>)
+                      )}
                     </div>
                     <div className="mt-3 rounded-md bg-muted/25 p-2">
                       {renderTransfer(rule, true)}
@@ -765,7 +886,8 @@ function RulesContent() {
                       {renderRuleActions(rule)}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="hidden overflow-x-auto lg:block">
                 <Table className="min-w-[980px] table-fixed">
@@ -783,13 +905,23 @@ function RulesContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredRules.map((rule) => (
-                      <TableRow key={rule.id}>
+                    {filteredRules.map((rule) => {
+                      const supported = isRuleSupported(rule);
+                      const protocolKey = getRuleProtocolKey(rule);
+                      return (
+                      <TableRow key={rule.id} className={!supported ? "opacity-70" : ""} title={!supported ? unsupportedProtocolTitle : undefined}>
                         <TableCell>
-                          <div className="flex items-center justify-center">{renderStatusDot(rule)}</div>
+                          <div className="flex items-center justify-center">
+                            {supported ? renderStatusDot(rule) : <span className="h-2.5 w-2.5 rounded-full bg-destructive/60" />}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <span className="block truncate font-medium" title={rule.name}>{rule.name}</span>
+                          {!supported && (
+                            <span className="mt-1 block text-[11px] text-destructive">
+                              {protocolKey ? FORWARD_PROTOCOL_LABELS[protocolKey] : "该协议"} 当前不支持
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <span className="block truncate text-sm text-muted-foreground" title={getHostName(rule.hostId)}>
@@ -803,15 +935,20 @@ function RulesContent() {
                         </TableCell>
                         <TableCell>{renderRuleTraffic(rule)}</TableCell>
                         <TableCell className="text-center">
-                          <Switch
-                            checked={rule.isEnabled}
-                            onCheckedChange={(checked) => toggleMutation.mutate({ id: rule.id, isEnabled: checked })}
-                            className="scale-75"
-                          />
+                          {supported ? (
+                            <Switch
+                              checked={rule.isEnabled}
+                              onCheckedChange={(checked) => toggleMutation.mutate({ id: rule.id, isEnabled: checked })}
+                              className="scale-75"
+                            />
+                          ) : (
+                            renderUnsupportedHint(<span className="inline-flex"><Switch checked={false} disabled className="scale-75" /></span>)
+                          )}
                         </TableCell>
                         <TableCell className="text-right">{renderRuleActions(rule)}</TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -833,7 +970,7 @@ function RulesContent() {
                   ? "创建转发规则开始端口转发"
                   : "请先添加主机，然后创建转发规则"}
               </p>
-              {hosts && hosts.length > 0 && canAdd && (
+              {hosts && hosts.length > 0 && canAdd && (usableForwardTypes.length > 0 || canUseGost) && (
                 <Button onClick={openCreate} variant="outline" className="mt-4 gap-2">
                   <Plus className="h-4 w-4" />
                   创建第一条规则
@@ -874,7 +1011,13 @@ function RulesContent() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button type="button" className={routeModeCardClass(form.routeMode === "local")} onClick={() => setRouteMode("local")}>
+              <button
+                type="button"
+                className={routeModeCardClass(form.routeMode === "local", !canUseLocalForward)}
+                onClick={() => setRouteMode("local")}
+                disabled={!canUseLocalForward}
+                title={!canUseLocalForward ? unsupportedProtocolTitle : undefined}
+              >
                 <div className="flex items-start gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                     <ArrowRightLeft className="h-4 w-4" />
@@ -885,7 +1028,13 @@ function RulesContent() {
                   </div>
                 </div>
               </button>
-              <button type="button" className={routeModeCardClass(form.routeMode === "tunnel", !canUseGost)} onClick={() => setRouteMode("tunnel")} disabled={!canUseGost}>
+              <button
+                type="button"
+                className={routeModeCardClass(form.routeMode === "tunnel", !canUseGost)}
+                onClick={() => setRouteMode("tunnel")}
+                disabled={!canUseGost}
+                title={!canUseGost ? unsupportedProtocolTitle : undefined}
+              >
                 <div className="flex items-start gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-chart-4/10 text-chart-4">
                     <Network className="h-4 w-4" />
@@ -991,7 +1140,7 @@ function RulesContent() {
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {allowedForwardTypes.map((t) => (
+                      {usableForwardTypes.map((t) => (
                         <SelectItem key={t} value={t}>{FORWARD_TYPE_LABELS[t]}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1179,7 +1328,7 @@ function RulesContent() {
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={isPending || !form.name || !form.hostId || !form.targetIp || !form.targetPort || portStatus === "used" || (form.routeMode === "tunnel" && !form.tunnelId)}
+              disabled={isPending || !form.name || !form.hostId || !form.targetIp || !form.targetPort || portStatus === "used" || (form.routeMode === "local" && usableForwardTypes.length === 0) || (form.routeMode === "tunnel" && !form.tunnelId)}
             >
               {isPending ? "处理中..." : editingId ? "保存" : "创建"}
             </Button>
