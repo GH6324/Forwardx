@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.57] - 2026-05-23
+
+### Added
+
+- Added unified billing ledger views for users and administrators.
+- Added Telegram widget login for already bound Telegram accounts.
+
+### Changed
+
+- Improved the billing sidebar labels and settings-page protocol switch management.
+- Bumped panel version to 2.2.57. Agent version remains 2.2.45.
+
 ## [2.2.56] - 2026-05-22
 
 ### Fixed
