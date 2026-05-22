@@ -5,6 +5,7 @@ import { getSessionCookieOptions } from "../_core/cookies";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { ENV } from "../env";
 import * as db from "../db";
+import { sendTelegramMessage } from "../telegramBot";
 
 const BIND_CODE_TTL_MS = 10 * 60 * 1000;
 
@@ -61,6 +62,30 @@ export const telegramRouter = router({
 
   adminStatus: adminProcedure.query(async () => {
     return getTelegramSettings();
+  }),
+
+  testSend: adminProcedure.mutation(async ({ ctx }) => {
+    const settings = await getTelegramSettings();
+    if (!settings.enabled || !settings.configured) {
+      throw new Error("Telegram 机器人尚未启用或未配置");
+    }
+    const user = await db.getUserById(ctx.user.id);
+    if (!user?.telegramId) {
+      throw new Error("当前管理员尚未绑定 Telegram，无法发送测试消息");
+    }
+    const displayName = user.name || user.username || `#${user.id}`;
+    const botLabel = settings.botUsername ? `@${settings.botUsername}` : "当前机器人";
+    await sendTelegramMessage(
+      user.telegramId,
+      [
+        "ForwardX Telegram 测试消息",
+        "",
+        `接收用户：${displayName}`,
+        `机器人：${botLabel}`,
+        `时间：${new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`,
+      ].join("\n"),
+    );
+    return { success: true };
   }),
 
   createBindCode: protectedProcedure.mutation(async ({ ctx }) => {

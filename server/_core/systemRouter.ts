@@ -7,7 +7,7 @@ import fs from "fs";
 import { clearPanelLogs, getPanelLogs, getPanelLogSummary } from "./panelLogger";
 import { approveMigrationRequest, createMigrationCode, getCurrentMigrationCode, rejectMigrationRequest } from "../migrationCodes";
 import { sendMail } from "../email";
-import { refreshTelegramBotProfile, startTelegramBot } from "../telegramBot";
+import { refreshTelegramBotProfile, resetTelegramBotPolling, startTelegramBot } from "../telegramBot";
 
 /**
  * 系统级别 router：
@@ -19,7 +19,7 @@ import { refreshTelegramBotProfile, startTelegramBot } from "../telegramBot";
 export const REPO_URL = "https://github.com/poouo/Forwardx";
 /** Telegram 双向消息机器人：用户可通过此反馈问题、接收补充信息 */
 export const TELEGRAM_BOT_URL = "https://t.me/miyin_private_bot";
-export const APP_VERSION = "2.2.49";
+export const APP_VERSION = "2.2.50";
 export const AGENT_VERSION = "2.2.45";
 const UPDATE_CHECK_COOLDOWN_MS = 60 * 1000;
 const MANUAL_LOCAL_UPGRADE_COMMAND =
@@ -341,11 +341,19 @@ export const systemRouter = router({
       if (input.telegram) {
         const next: Record<string, string | null> = {};
         if (input.telegram.enabled !== undefined) next.telegramBotEnabled = input.telegram.enabled ? "true" : "false";
-        if (input.telegram.clearToken) next.telegramBotToken = null;
+        let tokenChanged = false;
+        if (input.telegram.clearToken) {
+          next.telegramBotToken = null;
+          next.telegramBotUsername = null;
+          tokenChanged = true;
+        }
         if (input.telegram.botToken !== undefined && input.telegram.botToken.trim()) {
           next.telegramBotToken = input.telegram.botToken.trim();
+          next.telegramBotUsername = null;
+          tokenChanged = true;
         }
         await db.setSettings(next);
+        if (tokenChanged) resetTelegramBotPolling();
         if (next.telegramBotToken || input.telegram.enabled) {
           await refreshTelegramBotProfile().catch((error) => {
             console.warn(`[Telegram] getMe after settings update failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -26,6 +26,7 @@ type TelegramUpdate = {
 let pollingStarted = false;
 let pollingAbort = false;
 let updateOffset = 0;
+let activeTokenKey = "";
 
 const LOGIN_CODE_TTL_MS = 5 * 60 * 1000;
 
@@ -62,6 +63,11 @@ function formatTelegramName(from?: TelegramUser) {
   return from?.username ? `@${from.username}` : String(from?.id || "");
 }
 
+function getTokenKey(token: string) {
+  if (!token) return "";
+  return `${token.length}:${token.slice(0, 8)}:${token.slice(-8)}`;
+}
+
 async function getTelegramSettings() {
   const settings = await db.getAllSettings();
   const envToken = ENV.telegramBotToken.trim();
@@ -91,13 +97,17 @@ async function telegramApi<T = any>(method: string, body?: Record<string, unknow
   return json.result as T;
 }
 
-async function sendMessage(chatId: number, text: string) {
+async function sendMessage(chatId: number | string, text: string) {
   await telegramApi("sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
   });
+}
+
+export async function sendTelegramMessage(chatId: number | string, text: string) {
+  await sendMessage(chatId, text);
 }
 
 async function ensureTelegramIdentity(message: TelegramMessage) {
@@ -339,6 +349,11 @@ async function pollOnce() {
     await new Promise((resolve) => setTimeout(resolve, 30000));
     return;
   }
+  const tokenKey = getTokenKey(settings.token);
+  if (tokenKey !== activeTokenKey) {
+    updateOffset = 0;
+    activeTokenKey = tokenKey;
+  }
   const updates = await telegramApi<TelegramUpdate[]>("getUpdates", {
     offset: updateOffset || undefined,
     timeout: 25,
@@ -395,4 +410,9 @@ export async function startTelegramBot() {
 export function stopTelegramBot() {
   pollingAbort = true;
   pollingStarted = false;
+}
+
+export function resetTelegramBotPolling() {
+  updateOffset = 0;
+  activeTokenKey = "";
 }

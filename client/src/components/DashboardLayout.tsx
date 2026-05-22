@@ -238,6 +238,11 @@ function DashboardLayoutContent({
       setShowTelegramDialog(true);
       return;
     }
+    if (telegramStatus?.configured === false) {
+      setTelegramBind(null);
+      setShowTelegramDialog(true);
+      return;
+    }
     createTelegramBindMutation.mutate();
   };
 
@@ -406,6 +411,24 @@ function DashboardLayoutContent({
               </div>
             </button>
           )}
+          <button
+            type="button"
+            onClick={openTelegramDialog}
+            className="mb-2 flex w-full items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-2 text-left text-sky-700 transition-colors hover:bg-sky-500/15 dark:text-sky-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2"
+            title={telegramStatus?.bound ? "Telegram 已绑定" : "绑定 Telegram"}
+          >
+            <Send className="h-4 w-4 shrink-0" />
+            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+              <p className="text-xs font-medium leading-none">
+                {telegramStatus?.bound ? "Telegram 已绑定" : "绑定 Telegram"}
+              </p>
+              <p className="mt-1 truncate text-[11px] text-sky-700/75 dark:text-sky-300/75">
+                {telegramStatus?.bound
+                  ? (telegramStatus.account?.username ? `@${telegramStatus.account.username}` : "已连接机器人")
+                  : "点击生成绑定码"}
+              </p>
+            </div>
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">

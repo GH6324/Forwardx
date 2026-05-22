@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.50] - 2026-05-22
+
+### Added
+
+- Added Telegram bot test-send support from system settings for the currently bound administrator.
+- Added a persistent Telegram bind entry in the sidebar user area.
+
+### Changed
+
+- Moved Telegram bot configuration to a top-level system settings card.
+- Replacing the Telegram Bot Token now switches the active bot and resets polling state.
+- Bumped panel version to 2.2.50. Agent version remains 2.2.45.
+
 ## [2.2.49] - 2026-05-22
 
 ### Added

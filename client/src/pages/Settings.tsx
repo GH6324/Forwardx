@@ -304,6 +304,8 @@ function SettingsContent() {
         </Badge>
       </div>
 
+      <TelegramBotSettingsCard />
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-muted/30 border border-border/30">
           <TabsTrigger value="tokens" className="gap-1.5">
@@ -881,6 +883,144 @@ function PanelLogsSection() {
     </div>
   );
 }
+
+function TelegramBotSettingsCard() {
+  const utils = trpc.useUtils();
+  const { data: settings, isLoading } = trpc.system.getSettings.useQuery();
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramBotTokenInput, setTelegramBotTokenInput] = useState("");
+
+  useEffect(() => {
+    if (settings) {
+      setTelegramEnabled(!!settings.telegram?.enabled);
+    }
+  }, [settings]);
+
+  const updateSettingsMutation = trpc.system.updateSettings.useMutation({
+    onSuccess: () => {
+      utils.system.getSettings.invalidate();
+      toast.success("Telegram 机器人配置已保存");
+    },
+    onError: (err) => toast.error(err.message || "保存失败"),
+  });
+  const testTelegramMutation = trpc.telegram.testSend.useMutation({
+    onSuccess: () => toast.success("测试消息已发送，请查看已绑定的 Telegram"),
+    onError: (err) => toast.error(err.message || "测试发送失败"),
+  });
+
+  const handleSaveTelegram = () => {
+    updateSettingsMutation.mutate({
+      telegram: {
+        enabled: telegramEnabled,
+        botToken: telegramBotTokenInput.trim() || undefined,
+      },
+    });
+    setTelegramBotTokenInput("");
+  };
+
+  const handleClearTelegramToken = () => {
+    updateSettingsMutation.mutate({
+      telegram: {
+        enabled: false,
+        clearToken: true,
+      },
+    });
+    setTelegramEnabled(false);
+    setTelegramBotTokenInput("");
+  };
+
+  const tokenSourceLabel =
+    settings?.telegram?.tokenSource === "env"
+      ? "环境变量 TELEGRAM_BOT_TOKEN"
+      : settings?.telegram?.tokenSource === "database"
+        ? "数据库配置"
+        : "未配置";
+
+  return (
+    <Card className="border-sky-500/25 bg-sky-500/5 backdrop-blur-md">
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Send className="h-4 w-4 text-sky-500" />
+              Telegram 机器人
+            </CardTitle>
+            <CardDescription className="mt-1">
+              配置 Bot Token 后，用户可绑定 Telegram、查询用量、管理规则并生成网页登录链接。后台同一时间只使用当前这一只机器人，保存新 Token 会切换绑定机器人。
+            </CardDescription>
+          </div>
+          <Badge variant={settings?.telegram?.configured ? "default" : "outline"} className="w-fit">
+            {settings?.telegram?.configured ? "已配置" : "未配置"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (
+          <>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="space-y-2">
+                <Label>Bot Token</Label>
+                <Input
+                  type="password"
+                  placeholder={settings?.telegram?.tokenMasked || "从 @BotFather 获取，例如 123456:ABC..."}
+                  value={telegramBotTokenInput}
+                  onChange={(e) => setTelegramBotTokenInput(e.target.value)}
+                  disabled={settings?.telegram?.tokenSource === "env"}
+                />
+                <p className="text-xs text-muted-foreground">
+                  来源：{tokenSourceLabel}。环境变量优先级最高，数据库 Token 可随时替换为其他机器人；机器人使用长轮询，无需配置 webhook。
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/40 bg-background/50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">启用机器人</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {settings?.telegram?.botUsername ? `@${settings.telegram.botUsername}` : "保存 Token 后自动识别机器人"}
+                    </p>
+                  </div>
+                  <Switch checked={telegramEnabled} onCheckedChange={setTelegramEnabled} />
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleSaveTelegram} disabled={updateSettingsMutation.isPending}>
+                {updateSettingsMutation.isPending ? "保存中..." : "保存 Telegram 配置"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => testTelegramMutation.mutate()}
+                disabled={
+                  testTelegramMutation.isPending ||
+                  !settings?.telegram?.configured ||
+                  !settings?.telegram?.enabled
+                }
+              >
+                {testTelegramMutation.isPending ? "发送中..." : "测试发送"}
+              </Button>
+              {settings?.telegram?.tokenSource === "database" && (
+                <Button variant="outline" onClick={handleClearTelegramToken} disabled={updateSettingsMutation.isPending}>
+                  清空 Token
+                </Button>
+              )}
+              {settings?.telegram?.botUsername && (
+                <Button variant="ghost" asChild className="gap-2">
+                  <a href={`https://t.me/${settings.telegram.botUsername}`} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4" />
+                    打开机器人
+                  </a>
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SystemInfoSection() {
   const utils = trpc.useUtils();
   const { data: settings, isLoading } = trpc.system.getSettings.useQuery();
@@ -893,8 +1033,6 @@ function SystemInfoSection() {
   });
   const [panelUrlInput, setPanelUrlInput] = useState("");
   const [homepageEnabled, setHomepageEnabled] = useState(true);
-  const [telegramEnabled, setTelegramEnabled] = useState(false);
-  const [telegramBotTokenInput, setTelegramBotTokenInput] = useState("");
   const [migrationCode, setMigrationCode] = useState<{
     code: string;
     expiresAt: number;
@@ -919,7 +1057,6 @@ function SystemInfoSection() {
     if (settings) {
       setPanelUrlInput(settings.panelPublicUrl || "");
       setHomepageEnabled(settings.homepageEnabled ?? true);
-      setTelegramEnabled(!!settings.telegram?.enabled);
     }
   }, [settings]);
 
@@ -965,27 +1102,6 @@ function SystemInfoSection() {
 
   const handleSaveHomepage = () => {
     updateSettingsMutation.mutate({ homepageEnabled });
-  };
-
-  const handleSaveTelegram = () => {
-    updateSettingsMutation.mutate({
-      telegram: {
-        enabled: telegramEnabled,
-        botToken: telegramBotTokenInput.trim() || undefined,
-      },
-    });
-    setTelegramBotTokenInput("");
-  };
-
-  const handleClearTelegramToken = () => {
-    updateSettingsMutation.mutate({
-      telegram: {
-        enabled: false,
-        clearToken: true,
-      },
-    });
-    setTelegramEnabled(false);
-    setTelegramBotTokenInput("");
   };
 
   const createMigrationCodeMutation = trpc.system.createMigrationCode.useMutation({
@@ -1138,62 +1254,6 @@ function SystemInfoSection() {
             <Button variant="outline" onClick={handleSaveHomepage} disabled={updateSettingsMutation.isPending}>
               {updateSettingsMutation.isPending ? "保存中..." : "保存首页开关"}
             </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 bg-card/60 backdrop-blur-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Send className="h-4 w-4 text-sky-500" />
-              Telegram 机器人
-            </CardTitle>
-            <CardDescription>
-              绑定 Bot Token 后，用户可通过 Telegram 查询用量、管理规则并生成网页登录链接。环境变量 TELEGRAM_BOT_TOKEN 优先级最高。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border border-border/40 bg-muted/20 p-3">
-              <div>
-                <p className="text-sm font-medium">启用 Telegram Bot</p>
-                <p className="text-xs text-muted-foreground">
-                  当前状态：{settings?.telegram?.configured ? "已配置" : "未配置"}
-                  {settings?.telegram?.botUsername ? `，@${settings.telegram.botUsername}` : ""}
-                </p>
-              </div>
-              <Switch checked={telegramEnabled} onCheckedChange={setTelegramEnabled} />
-            </div>
-            <div className="space-y-2">
-              <Label>Bot Token</Label>
-              <Input
-                type="password"
-                placeholder={settings?.telegram?.tokenMasked || "从 @BotFather 获取，例如 123456:ABC..."}
-                value={telegramBotTokenInput}
-                onChange={(e) => setTelegramBotTokenInput(e.target.value)}
-                disabled={settings?.telegram?.tokenSource === "env"}
-              />
-              <p className="text-xs text-muted-foreground">
-                来源：{settings?.telegram?.tokenSource === "env" ? "环境变量 TELEGRAM_BOT_TOKEN" : settings?.telegram?.tokenSource === "database" ? "数据库配置" : "未配置"}。
-                机器人使用长轮询，无需配置 webhook。
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={handleSaveTelegram} disabled={updateSettingsMutation.isPending}>
-                {updateSettingsMutation.isPending ? "保存中..." : "保存机器人配置"}
-              </Button>
-              {settings?.telegram?.tokenSource === "database" && (
-                <Button variant="outline" onClick={handleClearTelegramToken} disabled={updateSettingsMutation.isPending}>
-                  清空 Token
-                </Button>
-              )}
-              {settings?.telegram?.botUsername && (
-                <Button variant="ghost" asChild className="gap-2">
-                  <a href={`https://t.me/${settings.telegram.botUsername}`} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="h-4 w-4" />
-                    打开机器人
-                  </a>
-                </Button>
-              )}
-            </div>
           </CardContent>
         </Card>
 
