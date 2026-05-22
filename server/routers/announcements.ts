@@ -5,7 +5,7 @@ import * as db from "../db";
 
 const announcementInput = z.object({
   title: z.string().trim().min(1).max(120),
-  content: z.string().trim().min(1).max(5000),
+  content: z.string().trim().min(1).max(60000),
   type: z.enum(["normal", "popup"]).default("normal"),
 });
 
@@ -14,14 +14,7 @@ function sanitizeAnnouncementContent(content: string) {
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
     .replace(/\son\w+="[^"]*"/gi, "")
     .replace(/\son\w+='[^']*'/gi, "")
-    .replace(/\sstyle="([^"]*)"/gi, (_match, style: string) => {
-      const safe = String(style)
-        .split(";")
-        .map((part) => part.trim())
-        .filter((part) => /^color\s*:\s*#[0-9a-f]{3,8}$/i.test(part))
-        .join("; ");
-      return safe ? ` style="${safe}"` : "";
-    });
+    .replace(/\s(?:href|src)=["']\s*javascript:[^"']*["']/gi, "");
 }
 
 export const announcementsRouter = router({

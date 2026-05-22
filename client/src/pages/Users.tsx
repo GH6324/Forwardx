@@ -427,7 +427,7 @@ function UsersContent() {
             </div>
           ) : users && users.length > 0 ? (
             <div className="overflow-x-auto">
-              <Table className="min-w-[1220px]">
+              <Table className="min-w-[720px] sm:min-w-[860px] md:min-w-[1120px] lg:min-w-[1380px] xl:min-w-[1520px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="w-[60px] whitespace-nowrap">ID</TableHead>
@@ -437,8 +437,8 @@ function UsersContent() {
                     <TableHead className="hidden w-[140px] whitespace-nowrap xl:table-cell">Telegram</TableHead>
                     <TableHead className="hidden w-[120px] whitespace-nowrap md:table-cell">余额</TableHead>
                     <TableHead className="hidden w-[140px] whitespace-nowrap md:table-cell">到期时间</TableHead>
-                    <TableHead className="hidden w-[130px] whitespace-nowrap lg:table-cell">权限</TableHead>
-                    <TableHead className="hidden w-[130px] whitespace-nowrap lg:table-cell">规则限制</TableHead>
+                    <TableHead className="hidden w-[160px] whitespace-nowrap lg:table-cell">权限</TableHead>
+                    <TableHead className="hidden w-[150px] whitespace-nowrap lg:table-cell">规则限制</TableHead>
                     <TableHead className="w-[190px] whitespace-nowrap text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -471,13 +471,14 @@ function UsersContent() {
                                 <p className="text-[10px] text-primary">当前登录</p>
                               )}
                               {u.role !== "admin" && (
-                                <div className="mt-2 flex items-center gap-2 lg:hidden">
+                                <div className="mt-2 flex w-fit items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2 py-1 lg:hidden">
                                   <Switch
                                     checked={!!u.canAddRules}
                                     disabled={updateForwardAccessMutation.isPending}
                                     onCheckedChange={(checked) => updateForwardAccessMutation.mutate({ userId: u.id, enabled: checked })}
+                                    className="shrink-0"
                                   />
-                                  <span className="text-[10px] text-muted-foreground">
+                                  <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
                                     {u.canAddRules ? "转发启用" : "转发停用"}
                                   </span>
                                 </div>
@@ -573,33 +574,34 @@ function UsersContent() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
+                        <TableCell className="hidden min-w-[160px] lg:table-cell">
+                          <div className="flex min-w-[140px] flex-col gap-1">
+                            <div className="flex items-center gap-2 whitespace-nowrap">
                               <Switch
                                 checked={u.role === "admin" || !!u.canAddRules}
                                 disabled={u.role === "admin" || updateForwardAccessMutation.isPending}
                                 onCheckedChange={(checked) => updateForwardAccessMutation.mutate({ userId: u.id, enabled: checked })}
+                                className="shrink-0"
                               />
                               {u.canAddRules || u.role === "admin" ? (
-                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-chart-2/30 text-chart-2 w-fit">
+                                <Badge variant="outline" className="h-5 w-fit shrink-0 whitespace-nowrap border-chart-2/30 px-2 py-0 text-[10px] text-chart-2">
                                   转发启用
                                 </Badge>
                               ) : (
-                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-muted-foreground/30 text-muted-foreground w-fit">
+                                <Badge variant="outline" className="h-5 w-fit shrink-0 whitespace-nowrap border-muted-foreground/30 px-2 py-0 text-[10px] text-muted-foreground">
                                   转发停用
                                 </Badge>
                               )}
                             </div>
                             {u.trafficAutoReset && (
-                              <span className="text-[9px] text-muted-foreground">
+                              <span className="whitespace-nowrap pl-[52px] text-[10px] text-muted-foreground">
                                 每月{u.trafficResetDay || 1}日重置
                               </span>
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          <div className="flex flex-col gap-0.5 whitespace-nowrap text-xs text-muted-foreground">
+                        <TableCell className="hidden min-w-[150px] lg:table-cell">
+                          <div className="flex min-w-[130px] flex-col gap-0.5 whitespace-nowrap text-xs leading-5 text-muted-foreground">
                             <span>规则: {u.maxRules ? `最多 ${u.maxRules} 条` : "不限"}</span>
                             <span>端口: {u.maxPorts ? `最多 ${u.maxPorts} 个` : "不限"}</span>
                             <span>连接: {u.maxConnections ? `最多 ${u.maxConnections}` : "不限"}</span>

@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { renderMixedHtml, describeContentFormat } from "@/lib/htmlContent";
 import { trpc } from "@/lib/trpc";
-import { Bold, Italic, Megaphone, Palette, Pencil, Plus, Trash2, Underline } from "lucide-react";
+import { Eye, Megaphone, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -27,7 +28,7 @@ function dateText(value?: string | Date | null) {
 }
 
 function renderAnnouncementHtml(content: string) {
-  return { __html: content };
+  return { __html: renderMixedHtml(content) };
 }
 
 export default function Announcements() {
@@ -36,6 +37,7 @@ export default function Announcements() {
   const utils = trpc.useUtils();
   const { data: announcements = [] } = trpc.announcements.list.useQuery();
   const [open, setOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   const createAnnouncement = trpc.announcements.create.useMutation({
@@ -77,20 +79,6 @@ export default function Announcements() {
     };
     if (form.id) updateAnnouncement.mutate({ ...payload, id: form.id });
     else createAnnouncement.mutate(payload);
-  };
-
-  const insertContent = (before: string, after = "") => {
-    const textarea = document.getElementById("announcement-content") as HTMLTextAreaElement | null;
-    const start = textarea?.selectionStart ?? form.content.length;
-    const end = textarea?.selectionEnd ?? form.content.length;
-    const selected = form.content.slice(start, end);
-    const next = `${form.content.slice(0, start)}${before}${selected}${after}${form.content.slice(end)}`;
-    setForm({ ...form, content: next });
-    requestAnimationFrame(() => {
-      textarea?.focus();
-      const cursor = start + before.length + selected.length;
-      textarea?.setSelectionRange(cursor, cursor);
-    });
   };
 
   const edit = (item: any) => {
@@ -144,7 +132,7 @@ export default function Announcements() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="whitespace-pre-wrap text-sm leading-6 text-foreground/85" dangerouslySetInnerHTML={renderAnnouncementHtml(item.content || "")} />
+                  <div className="text-sm leading-6 text-foreground/85" dangerouslySetInnerHTML={renderAnnouncementHtml(item.content || "")} />
                 </CardContent>
               </Card>
             );
@@ -168,21 +156,43 @@ export default function Announcements() {
                 <div className="space-y-2"><Label>类型</Label><Select value={form.type} onValueChange={(type: "normal" | "popup") => setForm({ ...form, type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="normal">普通公告</SelectItem><SelectItem value="popup">登录弹窗</SelectItem></SelectContent></Select></div>
               </div>
               <div className="space-y-2">
-                <Label>内容</Label>
-                <div className="flex flex-wrap gap-2 rounded-md border border-border/50 bg-muted/20 p-2">
-                  <Button type="button" variant="ghost" size="icon" title="加粗" onClick={() => insertContent("**", "**")}><Bold className="h-4 w-4" /></Button>
-                  <Button type="button" variant="ghost" size="icon" title="斜体" onClick={() => insertContent("*", "*")}><Italic className="h-4 w-4" /></Button>
-                  <Button type="button" variant="ghost" size="icon" title="下划线" onClick={() => insertContent("<u>", "</u>")}><Underline className="h-4 w-4" /></Button>
-                  <Button type="button" variant="ghost" size="icon" title="红色文字" onClick={() => insertContent('<span style="color:#ef4444">', "</span>")}><Palette className="h-4 w-4 text-red-500" /></Button>
-                  <Button type="button" variant="ghost" size="icon" title="绿色文字" onClick={() => insertContent('<span style="color:#22c55e">', "</span>")}><Palette className="h-4 w-4 text-emerald-500" /></Button>
-                  <Button type="button" variant="ghost" size="icon" title="蓝色文字" onClick={() => insertContent('<span style="color:#3b82f6">', "</span>")}><Palette className="h-4 w-4 text-blue-500" /></Button>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label>内容</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      直接输入文字会作为普通公告显示，也支持 Markdown；粘贴 H5/HTML 代码则按 HTML 渲染。
+                    </p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setPreviewOpen(true)} disabled={!form.content.trim()}>
+                    <Eye className="h-4 w-4" />
+                    预览
+                  </Button>
                 </div>
-                <Textarea id="announcement-content" className="min-h-40" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
+                <Textarea id="announcement-content" className="min-h-56 font-mono text-xs leading-5" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
+                <p className="text-xs text-muted-foreground">
+                  当前 {form.content.length.toLocaleString()} / 60,000 字符，检测为 {describeContentFormat(form.content)}。
+                </p>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
               <Button onClick={submit} disabled={!form.title.trim() || !form.content.trim() || createAnnouncement.isPending || updateAnnouncement.isPending}>保存</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>公告预览</DialogTitle>
+              <DialogDescription>当前内容按 {describeContentFormat(form.content)} 渲染。</DialogDescription>
+            </DialogHeader>
+            <div
+              className="max-h-[60svh] overflow-y-auto rounded-lg border bg-background/45 p-4 text-sm leading-6"
+              dangerouslySetInnerHTML={renderAnnouncementHtml(form.content)}
+            />
+            <DialogFooter>
+              <Button onClick={() => setPreviewOpen(false)}>关闭</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

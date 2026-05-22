@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useMemo } from "react";
-import PublicHome from "./PublicHome";
+import PublicHome, { CustomPublicHome } from "./PublicHome";
 import {
   Area,
   AreaChart,
@@ -606,7 +606,12 @@ export default function Home() {
   if (loading || settingsLoading) return null;
 
   if (!user) {
-    if (settings?.homepageEnabled !== false) return <PublicHome />;
+    if (settings?.homepageEnabled !== false) {
+      if (settings?.homepageCustomEnabled && settings?.homepageHtml?.trim()) {
+        return <CustomPublicHome html={settings.homepageHtml} />;
+      }
+      return <PublicHome />;
+    }
     if (typeof window !== "undefined") window.location.href = "/login";
     return null;
   }

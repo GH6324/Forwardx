@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { createHomepageDocument } from "@/lib/homepageHtml";
 import { trpc } from "@/lib/trpc";
 import { ArrowRight, Gauge, Lock, Network, Server, ShieldCheck, WalletCards, Zap } from "lucide-react";
 import { Link } from "wouter";
@@ -11,6 +12,18 @@ const features = [
   { title: "权限与套餐", text: "按用户控制主机、隧道、端口、流量和到期时间。", icon: ShieldCheck },
   { title: "流量统计与提醒", text: "展示转发流量趋势，并可通过邮件提醒临期和流量不足。", icon: Gauge },
 ];
+
+export function CustomPublicHome({ html }: { html: string }) {
+  const srcDoc = createHomepageDocument(html);
+  return (
+    <iframe
+      title="ForwardX custom homepage"
+      className="h-svh w-full border-0 bg-background"
+      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+      srcDoc={srcDoc}
+    />
+  );
+}
 
 export default function PublicHome() {
   const { data: info } = trpc.system.publicInfo.useQuery(undefined, { refetchOnWindowFocus: false });

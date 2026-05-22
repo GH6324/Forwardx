@@ -2,6 +2,7 @@ import * as db from "./db";
 import { ENV } from "./env";
 import { pushAgentRefresh } from "./agentEvents";
 import { pushTunnelEndpointRefresh } from "./routers/helpers";
+import { addMonthsClamped } from "./repositories/repositoryUtils";
 
 type TelegramUser = {
   id: number;
@@ -40,8 +41,10 @@ let pollingStarted = false;
 let pollingAbort = false;
 let updateOffset = 0;
 let activeTokenKey = "";
+const pendingBindChats = new Map<string, number>();
 
 const LOGIN_CODE_TTL_MS = 5 * 60 * 1000;
+const BIND_SESSION_TTL_MS = 10 * 60 * 1000;
 const USER_PAGE_SIZE = 10;
 const RULE_PAGE_SIZE = 10;
 const TELEGRAM_BOT_COMMANDS: TelegramBotCommand[] = [
@@ -49,11 +52,11 @@ const TELEGRAM_BOT_COMMANDS: TelegramBotCommand[] = [
   { command: "menu", description: "打开功能菜单" },
   { command: "usage", description: "查询流量和额度" },
   { command: "rules", description: "查看和管理转发规则" },
-  { command: "login", description: "生成网页登录链接" },
   { command: "bind", description: "使用绑定码绑定后台账号" },
   { command: "unbind", description: "解除 Telegram 绑定" },
   { command: "users", description: "管理员用户管理" },
   { command: "reset", description: "管理员重置用户流量" },
+  { command: "renew", description: "管理员续期用户一个月" },
   { command: "help", description: "查看帮助" },
 ];
 
@@ -84,6 +87,12 @@ function formatDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? "永久有效" : date.toLocaleDateString("zh-CN");
 }
 
+function formatDateTime(value: unknown) {
+  if (!value) return "永久有效";
+  const date = new Date(value as any);
+  return Number.isNaN(date.getTime()) ? "永久有效" : date.toLocaleString("zh-CN");
+}
+
 function formatTelegramName(from?: TelegramUser) {
   const parts = [from?.first_name, from?.last_name].filter(Boolean);
   if (parts.length) return parts.join(" ");
@@ -99,6 +108,35 @@ function clampPage(page: number, total: number, pageSize: number) {
 function shortText(value: unknown, length = 18) {
   const text = String(value || "-");
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
+}
+
+function getRenewalDates(user: any, months = 1) {
+  const currentExpiresAt = user?.expiresAt ? new Date(user.expiresAt) : null;
+  const now = new Date();
+  const base = currentExpiresAt && currentExpiresAt.getTime() > now.getTime() ? currentExpiresAt : now;
+  return { base, nextExpiresAt: addMonthsClamped(base, months) };
+}
+
+function getBindSessionKey(chatId: number | string, telegramId: string | number) {
+  return `${chatId}:${telegramId}`;
+}
+
+function startBindSession(chatId: number | string, telegramId: string | number) {
+  pendingBindChats.set(getBindSessionKey(chatId, telegramId), Date.now() + BIND_SESSION_TTL_MS);
+}
+
+function hasValidBindSession(chatId: number | string, telegramId: string | number) {
+  const key = getBindSessionKey(chatId, telegramId);
+  const expiresAt = pendingBindChats.get(key) || 0;
+  if (!expiresAt || expiresAt <= Date.now()) {
+    pendingBindChats.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function clearBindSession(chatId: number | string, telegramId: string | number) {
+  pendingBindChats.delete(getBindSessionKey(chatId, telegramId));
 }
 
 function getTokenKey(token: string) {
@@ -205,18 +243,86 @@ function helpText(bound: boolean, isAdmin = false) {
     "",
     bound
       ? "可用命令："
-      : "请先在面板个人菜单点击 Telegram 绑定按钮，或发送 /bind 绑定码。",
+      : "请先在面板个人菜单点击 Telegram 绑定按钮生成绑定码，然后在这里完成绑定。",
     "/usage - 查询我的用量",
     "/rules - 查看我的转发规则",
     "/enable 规则ID - 启用规则",
     "/disable 规则ID - 停用规则",
-    "/login - 生成网页登录链接",
-    "/unbind - 解除当前 Telegram 绑定",
+    "/unbind - 解除当前 Telegram 绑定（需要确认）",
   ];
   if (isAdmin) {
-    base.push("", "管理员命令：", "/users - 查看用户流量概览", "/reset 用户ID - 重置用户流量");
+    base.push("", "管理员命令：", "/users - 查看用户管理", "/reset 用户ID - 重置用户流量", "/renew 用户ID - 续期用户一个月");
   }
   return base.map(escapeHtml).join("\n");
+}
+
+function bindPromptKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: "绑定 Telegram", callback_data: "fx:bind:start" }],
+    ],
+  };
+}
+
+function bindCancelKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: "取消绑定", callback_data: "fx:bind:cancel" }],
+    ],
+  };
+}
+
+function unbindConfirmKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "确认解除绑定", callback_data: "fx:unbind:confirm" },
+        { text: "取消", callback_data: "fx:menu" },
+      ],
+    ],
+  };
+}
+
+async function sendBindPrompt(chatId: number | string) {
+  await sendMessage(
+    chatId,
+    [
+      "<b>绑定 Telegram</b>",
+      "",
+      "当前 Telegram 尚未绑定 ForwardX 账户。",
+      "请先在网页面板的个人菜单里点击 Telegram 绑定生成绑定码，然后点击下面按钮并发送绑定码。",
+    ].join("\n"),
+    bindPromptKeyboard(),
+  );
+}
+
+async function sendBindCodePrompt(chatId: number | string, telegramId: string | number) {
+  startBindSession(chatId, telegramId);
+  await sendMessage(
+    chatId,
+    [
+      "<b>请输入绑定码</b>",
+      "",
+      `请在 ${Math.round(BIND_SESSION_TTL_MS / 60000)} 分钟内直接发送网页面板生成的 Telegram 绑定码。`,
+      "绑定码通常是一串大写字母和数字。",
+    ].join("\n"),
+    bindCancelKeyboard(),
+  );
+}
+
+async function editBindCodePrompt(chatId: number | string, messageId: number, telegramId: string | number) {
+  startBindSession(chatId, telegramId);
+  await editMessage(
+    chatId,
+    messageId,
+    [
+      "<b>请输入绑定码</b>",
+      "",
+      `请在 ${Math.round(BIND_SESSION_TTL_MS / 60000)} 分钟内直接发送网页面板生成的 Telegram 绑定码。`,
+      "绑定码通常是一串大写字母和数字。",
+    ].join("\n"),
+    bindCancelKeyboard(),
+  );
 }
 
 function parseCommand(text: string) {
@@ -233,7 +339,6 @@ function mainMenuKeyboard(user: any): InlineKeyboardMarkup {
     ],
     [
       { text: "转发规则", callback_data: "fx:rules" },
-      { text: "登录后台", callback_data: "fx:login" },
     ],
   ];
   if (user?.role === "admin") {
@@ -256,6 +361,18 @@ function userManageBackKeyboard(page = 0): InlineKeyboardMarkup {
     inline_keyboard: [
       [{ text: "返回用户列表", callback_data: `fx:users:${page}` }],
       [{ text: "返回菜单", callback_data: "fx:menu" }],
+    ],
+  };
+}
+
+function renewalConfirmKeyboard(userId: number, page = 0): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "确认续期 1 个月", callback_data: `fx:admin:renew:confirm:${userId}:${page}` },
+        { text: "取消", callback_data: `fx:admin:user:${userId}:${page}` },
+      ],
+      [{ text: "返回用户详情", callback_data: `fx:admin:user:${userId}:${page}` }],
     ],
   };
 }
@@ -460,11 +577,39 @@ async function adminUserKeyboard(userId: number, page = 0): Promise<InlineKeyboa
         { text: "重置流量", callback_data: `fx:admin:reset:${userId}:${page}` },
         { text: accessEnabled ? "停用转发" : "启用转发", callback_data: `fx:admin:access:${userId}:${accessEnabled ? "0" : "1"}:${page}` },
       ],
+      [{ text: "续期 1 个月", callback_data: `fx:admin:renew:${userId}:${page}` }],
       [{ text: "刷新详情", callback_data: `fx:admin:user:${userId}:${page}` }],
       [{ text: "返回用户列表", callback_data: `fx:users:${page}` }],
       [{ text: "返回菜单", callback_data: "fx:menu" }],
     ],
   };
+}
+
+async function renewalConfirmText(userId: number) {
+  const target = await db.getUserById(userId);
+  if (!target) return { target: null, text: "用户不存在。" };
+  const { base, nextExpiresAt } = getRenewalDates(target, 1);
+  const text = [
+    "<b>确认套餐续期</b>",
+    "",
+    `用户：#${target.id} ${escapeHtml(target.name || target.username)}`,
+    `当前到期：${escapeHtml(formatDateTime(target.expiresAt))}`,
+    `续期方式：从${base.getTime() > Date.now() ? "当前到期时间" : "当前时间"}起延长 1 个月`,
+    `续期后到期：<b>${escapeHtml(formatDateTime(nextExpiresAt))}</b>`,
+    "",
+    "请确认后再执行续期。",
+  ].join("\n");
+  return { target, text, nextExpiresAt };
+}
+
+async function renewUserOneMonth(userId: number) {
+  const target = await db.getUserById(userId);
+  if (!target) throw new Error("用户不存在");
+  const { nextExpiresAt } = getRenewalDates(target, 1);
+  await db.updateUserTrafficSettings(userId, {
+    expiresAt: nextExpiresAt,
+  });
+  return { target, nextExpiresAt };
 }
 
 async function loginText(user: any) {
@@ -498,13 +643,15 @@ async function handleBind(message: TelegramMessage, code: string) {
   const normalized = code.trim().toUpperCase();
   const user = await db.getUserByTelegramBindCode(normalized);
   if (!user) {
-    await sendMessage(message.chat.id, "绑定码无效。请在面板中重新生成绑定码。");
+    if (from?.id) startBindSession(message.chat.id, from.id);
+    await sendMessage(message.chat.id, "绑定码无效。请在面板中重新生成或检查后再次发送。", bindCancelKeyboard());
     return;
   }
   const expiresAt = user.telegramBindCodeExpiresAt ? new Date(user.telegramBindCodeExpiresAt).getTime() : 0;
   if (!expiresAt || expiresAt <= Date.now()) {
     await db.clearTelegramBindCode(user.id);
-    await sendMessage(message.chat.id, "绑定码已过期。请在面板中重新生成绑定码。");
+    if (from?.id) startBindSession(message.chat.id, from.id);
+    await sendMessage(message.chat.id, "绑定码已过期。请在面板中重新生成绑定码后再次发送。", bindCancelKeyboard());
     return;
   }
   await db.bindTelegramAccount(user.id, {
@@ -515,7 +662,7 @@ async function handleBind(message: TelegramMessage, code: string) {
   });
   await sendMessage(
     message.chat.id,
-    `已绑定到 ForwardX 账户：<b>${escapeHtml(user.name || user.username)}</b>\n之后可以使用 /usage、/rules、/login。`,
+    `已绑定到 ForwardX 账户：<b>${escapeHtml(user.name || user.username)}</b>\n之后可以使用 /usage、/rules 和功能菜单。`,
   );
   const boundUser = await db.getUserById(user.id);
   if (boundUser) await sendMainMenu(message.chat.id, boundUser);
@@ -636,12 +783,23 @@ async function handleReset(message: TelegramMessage, userIdRaw: string | undefin
   await sendMessage(message.chat.id, `用户 #${userId} ${escapeHtml(user.name || user.username)} 的流量已重置。`);
 }
 
+async function handleRenew(message: TelegramMessage, userIdRaw: string | undefined) {
+  const userId = Number(userIdRaw);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    await sendMessage(message.chat.id, "请发送 /renew 用户ID，例如：/renew 8。该操作需要二次确认。");
+    return;
+  }
+  const detail = await renewalConfirmText(userId);
+  await sendMessage(message.chat.id, detail.text, detail.target ? renewalConfirmKeyboard(userId, 0) : undefined);
+}
+
 async function handleMessage(message: TelegramMessage) {
   const text = message.text?.trim();
   if (!text) return;
   const { command, args } = parseCommand(text);
   const identity = await ensureTelegramIdentity(message);
   if (!identity) return;
+  const waitingForBindCode = hasValidBindSession(message.chat.id, identity.telegramId);
 
   if (command === "/start" && args[0]) {
     await handleBind(message, args[0]);
@@ -651,18 +809,28 @@ async function handleMessage(message: TelegramMessage) {
     if (identity.user) {
       await sendMainMenu(message.chat.id, identity.user);
     } else {
-      await sendMessage(message.chat.id, helpText(false));
+      await sendBindPrompt(message.chat.id);
     }
     return;
   }
   if (command === "/bind") {
-    await handleBind(message, args[0] || "");
+    if (identity.user) {
+      await sendMainMenu(message.chat.id, identity.user);
+      return;
+    }
+    if (args[0]) await handleBind(message, args[0]);
+    else await sendBindCodePrompt(message.chat.id, identity.telegramId);
     return;
   }
 
   const user = identity.user;
   if (!user) {
-    await sendMessage(message.chat.id, "当前 Telegram 尚未绑定 ForwardX 账户。请先在面板个人菜单点击 Telegram 绑定按钮，或发送 /bind 绑定码。");
+    if (waitingForBindCode && !text.startsWith("/")) {
+      await handleBind(message, text);
+      clearBindSession(message.chat.id, identity.telegramId);
+      return;
+    }
+    await sendBindPrompt(message.chat.id);
     return;
   }
 
@@ -671,15 +839,14 @@ async function handleMessage(message: TelegramMessage) {
   if (command === "/rules") return handleRules(message, user);
   if (command === "/enable") return handleRuleToggle(message, user, args[0], true);
   if (command === "/disable") return handleRuleToggle(message, user, args[0], false);
-  if (command === "/login") return handleLogin(message, user);
   if (command === "/unbind") {
-    await db.unbindTelegramAccount(user.id);
-    await sendMessage(message.chat.id, "已解除当前 Telegram 绑定。");
+    await sendMessage(message.chat.id, "确认解除当前 Telegram 绑定吗？解除后需要重新绑定才能使用机器人。", unbindConfirmKeyboard());
     return;
   }
 
   if (user.role === "admin" && command === "/users") return handleUsers(message);
   if (user.role === "admin" && command === "/reset") return handleReset(message, args[0]);
+  if (user.role === "admin" && command === "/renew") return handleRenew(message, args[0]);
 
   await sendMessage(message.chat.id, helpText(true, user.role === "admin"));
 }
@@ -692,12 +859,25 @@ async function handleCallback(query: TelegramCallbackQuery) {
   const user = identity.user;
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
+  const data = query.data || "";
+  if (data === "fx:bind:start") {
+    if (user) {
+      await editMainMenu(chatId, messageId, user);
+    } else {
+      await editBindCodePrompt(chatId, messageId, identity.telegramId);
+    }
+    return;
+  }
+  if (data === "fx:bind:cancel") {
+    clearBindSession(chatId, identity.telegramId);
+    await editMessage(chatId, messageId, "已取消本次绑定。需要绑定时可再次点击下方按钮。", bindPromptKeyboard());
+    return;
+  }
   if (!user) {
-    await editMessage(chatId, messageId, "当前 Telegram 尚未绑定 ForwardX 账户。请先在面板中完成绑定。");
+    await editMessage(chatId, messageId, "当前 Telegram 尚未绑定 ForwardX 账户。请先完成绑定。", bindPromptKeyboard());
     return;
   }
 
-  const data = query.data || "";
   if (data.startsWith("fx:rules:")) {
     const page = Number(data.split(":")[2] || 0);
     const view = await rulesView(user, page);
@@ -789,6 +969,36 @@ async function handleCallback(query: TelegramCallbackQuery) {
     await editMessage(chatId, messageId, `已${enabled ? "启用" : "停用"}用户 #${userId} 的转发权限。\n\n${detail.text}`, await adminUserKeyboard(userId, page));
     return;
   }
+  if (data.startsWith("fx:admin:renew:confirm:")) {
+    if (user.role !== "admin") {
+      await editMessage(chatId, messageId, "你没有管理员权限。", backMenuKeyboard());
+      return;
+    }
+    const [, , , , userIdRaw, pageRaw] = data.split(":");
+    const userId = Number(userIdRaw);
+    const page = Number(pageRaw || 0);
+    const result = await renewUserOneMonth(userId);
+    const detail = await adminUserText(userId);
+    await editMessage(
+      chatId,
+      messageId,
+      `已为用户 #${userId} 续期 1 个月。\n新到期时间：<b>${escapeHtml(formatDateTime(result.nextExpiresAt))}</b>\n\n${detail.text}`,
+      await adminUserKeyboard(userId, page),
+    );
+    return;
+  }
+  if (data.startsWith("fx:admin:renew:")) {
+    if (user.role !== "admin") {
+      await editMessage(chatId, messageId, "你没有管理员权限。", backMenuKeyboard());
+      return;
+    }
+    const [, , , userIdRaw, pageRaw] = data.split(":");
+    const userId = Number(userIdRaw);
+    const page = Number(pageRaw || 0);
+    const detail = await renewalConfirmText(userId);
+    await editMessage(chatId, messageId, detail.text, detail.target ? renewalConfirmKeyboard(userId, page) : userManageBackKeyboard(page));
+    return;
+  }
 
   switch (data) {
     case "fx:menu":
@@ -806,9 +1016,6 @@ async function handleCallback(query: TelegramCallbackQuery) {
         await editMessage(chatId, messageId, view.text, view.keyboard);
       }
       return;
-    case "fx:login":
-      await editMessage(chatId, messageId, await loginText(user), backMenuKeyboard());
-      return;
     case "fx:users":
       if (user.role !== "admin") {
         await editMessage(chatId, messageId, "你没有管理员权限。", backMenuKeyboard());
@@ -820,8 +1027,11 @@ async function handleCallback(query: TelegramCallbackQuery) {
       }
       return;
     case "fx:unbind":
+      await editMessage(chatId, messageId, "确认解除当前 Telegram 绑定吗？解除后需要重新绑定才能使用机器人。", unbindConfirmKeyboard());
+      return;
+    case "fx:unbind:confirm":
       await db.unbindTelegramAccount(user.id);
-      await editMessage(chatId, messageId, "已解除当前 Telegram 绑定。");
+      await editMessage(chatId, messageId, "已解除当前 Telegram 绑定。", bindPromptKeyboard());
       return;
     default:
       await editMainMenu(chatId, messageId, user);

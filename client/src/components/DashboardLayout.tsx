@@ -60,6 +60,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { renderMixedHtml } from "@/lib/htmlContent";
 
 const announcementsMenuItem = { icon: Megaphone, label: "公告", path: "/announcements" };
 
@@ -442,72 +443,52 @@ function DashboardLayoutContent({
         </SidebarContent>
 
         <SidebarFooter className="p-3">
-          {isAdmin && updateInfo?.hasUpdate && (
-            <button
-              type="button"
-              onClick={() => setLocation("/settings?tab=system")}
-              className="mb-2 flex w-full items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-left text-primary transition-colors hover:bg-primary/15 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2"
-              title={`发现新版本 ${updateInfo.latestVersion}`}
-            >
-              <Rocket className="h-4 w-4 shrink-0" />
-              <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-                <p className="text-xs font-medium leading-none">发现新版本</p>
-                <p className="mt-1 truncate font-mono text-[11px]">{updateInfo.latestVersion}</p>
-              </div>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={openTelegramDialog}
-            className="mb-2 flex w-full items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-2 text-left text-sky-700 transition-colors hover:bg-sky-500/15 dark:text-sky-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2"
-            title={telegramStatus?.bound ? "Telegram 已绑定" : "绑定 Telegram"}
-          >
-            <Send className="h-4 w-4 shrink-0" />
-            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <p className="text-xs font-medium leading-none">
-                {telegramStatus?.bound ? "Telegram 已绑定" : "绑定 Telegram"}
-              </p>
-              <p className="mt-1 truncate text-[11px] text-sky-700/75 dark:text-sky-300/75">
-                {telegramStatus?.bound
-                  ? (telegramStatus.account?.username ? `@${telegramStatus.account.username}` : "已连接机器人")
-                  : "点击生成绑定码"}
-              </p>
-            </div>
-          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <button
+                className="flex items-center gap-2 rounded-lg border border-border/40 bg-background/35 px-2 py-2 text-left transition-colors hover:bg-accent/50 w-full group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:px-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={user?.name || user?.username || "账号菜单"}
+              >
                 <Avatar className="h-9 w-9 border shrink-0">
                   <AvatarFallback className="text-xs font-medium bg-primary/10 text-primary">
                     {user?.name?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm font-medium leading-none">
-                      {user?.name || user?.username || "-"}
-                    </p>
-                    {isAdmin && (
-                      <Badge
-                        variant="secondary"
-                        className="h-4 shrink-0 whitespace-nowrap border-0 bg-primary/10 px-1.5 py-0 text-[10px] leading-none text-primary"
-                      >
-                        管理员
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-1.5">
-                    {user?.username || "-"}
+                  <p className="truncate text-sm font-medium leading-none">账号菜单</p>
+                  <p className="mt-1.5 truncate text-xs text-muted-foreground">
+                    {isAdmin ? "管理员" : "用户"} · {telegramStatus?.bound ? "TG 已绑定" : "TG 未绑定"}
                   </p>
                 </div>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-56">
               <div className="px-2 py-1.5">
-                <p className="text-sm font-medium">{user?.name || user?.username}</p>
-                <p className="text-xs text-muted-foreground">{user?.username}</p>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{user?.name || user?.username}</p>
+                    <p className="truncate text-xs text-muted-foreground">{user?.username}</p>
+                  </div>
+                  {isAdmin && (
+                    <Badge
+                      variant="secondary"
+                      className="h-5 shrink-0 whitespace-nowrap border-0 bg-primary/10 px-1.5 py-0 text-[10px] leading-none text-primary"
+                    >
+                      管理员
+                    </Badge>
+                  )}
+                </div>
               </div>
               <DropdownMenuSeparator />
+              {isAdmin && updateInfo?.hasUpdate && (
+                <DropdownMenuItem
+                  onClick={() => setLocation("/settings?tab=system")}
+                  className="cursor-pointer text-primary focus:text-primary"
+                >
+                  <Rocket className="mr-2 h-4 w-4" />
+                  <span>发现新版本 {updateInfo.latestVersion}</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => setShowChangePassword(true)}
                 className="cursor-pointer"
@@ -622,7 +603,7 @@ function DashboardLayoutContent({
             Telegram 绑定
           </DialogTitle>
           <DialogDescription>
-            绑定后可在 Telegram 查询用量、管理自己的转发规则，并生成网页登录链接。
+            绑定后可在 Telegram 查询用量，并管理自己的转发规则。
           </DialogDescription>
           <div className="space-y-4 py-2">
             {telegramStatus?.bound ? (
@@ -693,15 +674,25 @@ function DashboardLayoutContent({
           </div>
           <DialogFooter className="gap-2">
             {telegramStatus?.bound ? (
-              <Button
-                variant="destructive"
-                className="gap-2"
-                onClick={() => unbindTelegramMutation.mutate()}
-                disabled={unbindTelegramMutation.isPending}
-              >
-                <Link2Off className="h-4 w-4" />
-                解除绑定
-              </Button>
+              <>
+                {telegramBotUrl && (
+                  <Button variant="outline" asChild className="gap-2">
+                    <a href={telegramBotUrl} target="_blank" rel="noopener noreferrer">
+                      <Send className="h-4 w-4" />
+                      打开机器人
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={() => unbindTelegramMutation.mutate()}
+                  disabled={unbindTelegramMutation.isPending}
+                >
+                  <Link2Off className="h-4 w-4" />
+                  解除绑定
+                </Button>
+              </>
             ) : (
               <Button
                 onClick={() => createTelegramBindMutation.mutate()}
@@ -725,8 +716,8 @@ function DashboardLayoutContent({
           </DialogTitle>
           <DialogDescription>管理员发布的登录提醒，关闭后可在左侧“公告”中查看。</DialogDescription>
           <div
-            className="max-h-[50svh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-background/45 p-4 text-sm leading-6"
-            dangerouslySetInnerHTML={{ __html: popupAnnouncement?.content || "" }}
+            className="max-h-[50svh] overflow-y-auto rounded-lg border bg-background/45 p-4 text-sm leading-6"
+            dangerouslySetInnerHTML={{ __html: renderMixedHtml(popupAnnouncement?.content || "") }}
           />
           <DialogFooter>
             <Button onClick={() => popupAnnouncement?.id && dismissAnnouncement.mutate({ id: popupAnnouncement.id })}>我知道了</Button>

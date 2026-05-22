@@ -19,7 +19,7 @@ import { refreshTelegramBotProfile, resetTelegramBotPolling, startTelegramBot } 
 export const REPO_URL = "https://github.com/poouo/Forwardx";
 /** Telegram 双向消息机器人：用户可通过此反馈问题、接收补充信息 */
 export const TELEGRAM_BOT_URL = "https://t.me/miyin_private_bot";
-export const APP_VERSION = "2.2.52";
+export const APP_VERSION = "2.2.53";
 export const AGENT_VERSION = "2.2.45";
 const UPDATE_CHECK_COOLDOWN_MS = 60 * 1000;
 const MANUAL_LOCAL_UPGRADE_COMMAND =
@@ -234,6 +234,8 @@ export const systemRouter = router({
       agentVersion: AGENT_VERSION,
       panelPublicUrl: all.panelPublicUrl ?? "",
       homepageEnabled: all.homepageEnabled !== "false",
+      homepageCustomEnabled: all.homepageCustomEnabled === "true",
+      homepageHtml: all.homepageHtml ?? "",
       database: {
         type: all.databaseType || (all.mysqlConfigured === "true" ? "mysql" : "sqlite"),
         configured: Boolean(all.databaseConfigured || all.mysqlConfigured),
@@ -289,6 +291,8 @@ export const systemRouter = router({
       z.object({
         panelPublicUrl: z.string().max(256).optional(),
         homepageEnabled: z.boolean().optional(),
+        homepageCustomEnabled: z.boolean().optional(),
+        homepageHtml: z.string().max(60000).optional(),
         email: z.object({
           enabled: z.boolean().optional(),
           host: z.string().max(256).optional(),
@@ -326,6 +330,14 @@ export const systemRouter = router({
       if (input.homepageEnabled !== undefined) {
         await db.setSetting("homepageEnabled", input.homepageEnabled ? "true" : "false");
         console.info(`[Settings] homepage ${input.homepageEnabled ? "enabled" : "disabled"}`);
+      }
+      if (input.homepageCustomEnabled !== undefined) {
+        await db.setSetting("homepageCustomEnabled", input.homepageCustomEnabled ? "true" : "false");
+        console.info(`[Settings] custom homepage ${input.homepageCustomEnabled ? "enabled" : "disabled"}`);
+      }
+      if (input.homepageHtml !== undefined) {
+        await db.setSetting("homepageHtml", input.homepageHtml.trim() || null);
+        console.info("[Settings] custom homepage html updated");
       }
       if (input.email) {
         const email = input.email;

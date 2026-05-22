@@ -142,6 +142,8 @@ async function clearExistingPanelData() {
   await setSettings({
     storeEnabled: settings.storeEnabled ?? "false",
     homepageEnabled: settings.homepageEnabled ?? "true",
+    homepageCustomEnabled: settings.homepageCustomEnabled ?? "false",
+    homepageHtml: settings.homepageHtml ?? "",
     redemptionEnabled: settings.redemptionEnabled ?? "true",
     discountEnabled: settings.discountEnabled ?? "true",
     databaseConfigured: "true",

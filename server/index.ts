@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { createServer } from "http";
 import net from "net";
 import path from "path";
+import { fileURLToPath } from "url";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./_core/context";
@@ -16,6 +17,8 @@ import { startScheduler } from "./scheduler";
 import { startTelegramBot } from "./telegramBot";
 
 installPanelLogger();
+
+const serverDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -35,7 +38,7 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 }
 
 function serveStatic(app: express.Express) {
-  const clientDist = path.resolve(__dirname, "../client/dist");
+  const clientDist = path.resolve(serverDir, "../client/dist");
   app.use(express.static(clientDist));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(clientDist, "index.html"));

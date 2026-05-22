@@ -22,6 +22,7 @@ import Wallet from "./pages/Wallet";
 import Announcements from "./pages/Announcements";
 import Setup from "./pages/Setup";
 import EmailSettings from "./pages/EmailSettings";
+import HomepagePreview from "./pages/HomepagePreview";
 
 function AdminRoute({ component: Component }: { component: ComponentType }) {
   const { user, loading } = useAuth();
@@ -36,6 +37,7 @@ function Router() {
     <Switch>
       <Route path="/setup" component={Setup} />
       <Route path="/login" component={Login} />
+      <Route path="/homepage-preview" component={HomepagePreview} />
       <Route path="/" component={Home} />
       <Route path="/hosts">{() => <AdminRoute component={Hosts} />}</Route>
       <Route path="/rules" component={Rules} />

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -46,6 +47,7 @@ import {
   AlertTriangle,
   Pencil,
   FileText,
+  Eye,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useRef, useState, useEffect } from "react";
@@ -116,6 +118,148 @@ const manualPanelUpgradeCommands = [
       "curl -fsSL https://raw.githubusercontent.com/poouo/Forwardx/main/scripts/install-panel-docker.sh | sudo bash -s -- upgrade",
   },
 ];
+
+const defaultHomepageHtml = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ForwardX</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #0f172a;
+      background: linear-gradient(135deg, #f8fafc 0%, #ecfeff 48%, #fff7ed 100%);
+    }
+    .page {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px 18px;
+    }
+    .hero {
+      width: min(1080px, 100%);
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 36px;
+      align-items: center;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(16, 185, 129, .28);
+      background: rgba(255, 255, 255, .72);
+      color: #047857;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+    }
+    h1 {
+      margin: 18px 0 14px;
+      font-size: clamp(42px, 7vw, 76px);
+      line-height: .95;
+      letter-spacing: 0;
+    }
+    p {
+      max-width: 620px;
+      color: #475569;
+      font-size: 17px;
+      line-height: 1.8;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 26px;
+    }
+    .btn {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      padding: 0 18px;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .btn.primary {
+      color: white;
+      background: #0f172a;
+    }
+    .btn.secondary {
+      color: #0f172a;
+      border: 1px solid rgba(15, 23, 42, .16);
+      background: rgba(255, 255, 255, .7);
+    }
+    .panel {
+      border: 1px solid rgba(15, 23, 42, .08);
+      background: rgba(255, 255, 255, .76);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 24px 80px rgba(15, 23, 42, .12);
+      backdrop-filter: blur(18px);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .item {
+      border: 1px solid rgba(15, 23, 42, .08);
+      border-radius: 12px;
+      padding: 16px;
+      background: rgba(248, 250, 252, .72);
+    }
+    .item b {
+      display: block;
+      margin-bottom: 6px;
+    }
+    .item span {
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    @media (max-width: 820px) {
+      .hero { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <span class="eyebrow"><span class="dot"></span>ForwardX 面板</span>
+        <h1>高速稳定的端口转发服务</h1>
+        <p>集中管理多节点转发、隧道、套餐、流量和用户权限。你可以把这里替换成自己的品牌介绍、套餐说明、客服入口或活动页面。</p>
+        <div class="actions">
+          <a class="btn primary" href="/login">进入面板</a>
+          <a class="btn secondary" href="/login?mode=register">创建账号</a>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="grid">
+          <div class="item"><b>多节点</b><span>统一管理多台 Linux 主机和隧道。</span></div>
+          <div class="item"><b>流量统计</b><span>按用户和规则记录转发用量。</span></div>
+          <div class="item"><b>套餐订阅</b><span>支持余额、套餐和支付配置。</span></div>
+          <div class="item"><b>Telegram</b><span>用户可通过机器人自助查询和管理。</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>`;
 
 function formatCountdown(seconds: number) {
   const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -962,7 +1106,7 @@ function TelegramBotSettingsCard() {
               Telegram 机器人
             </CardTitle>
             <CardDescription className="mt-1">
-              配置 Bot Token 后，用户可绑定 Telegram、查询用量、管理规则并生成网页登录链接。后台同一时间只使用当前这一只机器人，保存新 Token 会切换绑定机器人。
+              配置 Bot Token 后，用户可绑定 Telegram、查询用量并管理规则。后台同一时间只使用当前这一只机器人，保存新 Token 会切换绑定机器人。
             </CardDescription>
           </div>
           <Badge variant={settings?.telegram?.configured ? "default" : "outline"} className="w-fit">
@@ -1081,6 +1225,8 @@ function SystemInfoSection() {
   });
   const [panelUrlInput, setPanelUrlInput] = useState("");
   const [homepageEnabled, setHomepageEnabled] = useState(true);
+  const [homepageCustomEnabled, setHomepageCustomEnabled] = useState(false);
+  const [homepageHtml, setHomepageHtml] = useState("");
   const [migrationCode, setMigrationCode] = useState<{
     code: string;
     expiresAt: number;
@@ -1105,6 +1251,8 @@ function SystemInfoSection() {
     if (settings) {
       setPanelUrlInput(settings.panelPublicUrl || "");
       setHomepageEnabled(settings.homepageEnabled ?? true);
+      setHomepageCustomEnabled(!!settings.homepageCustomEnabled);
+      setHomepageHtml(settings.homepageHtml || "");
     }
   }, [settings]);
 
@@ -1149,7 +1297,17 @@ function SystemInfoSection() {
   };
 
   const handleSaveHomepage = () => {
-    updateSettingsMutation.mutate({ homepageEnabled });
+    updateSettingsMutation.mutate({ homepageEnabled, homepageCustomEnabled, homepageHtml });
+  };
+
+  const handlePreviewHomepage = () => {
+    window.sessionStorage.setItem("forwardx.homepage.preview", homepageHtml);
+    window.open("/homepage-preview?mode=draft", "_blank", "noopener,noreferrer");
+  };
+
+  const handleUseHomepageTemplate = () => {
+    if (homepageHtml.trim() && !window.confirm("当前编辑内容会被示例模板覆盖，确定继续吗？")) return;
+    setHomepageHtml(defaultHomepageHtml);
   };
 
   const createMigrationCodeMutation = trpc.system.createMigrationCode.useMutation({
@@ -1281,27 +1439,71 @@ function SystemInfoSection() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/40 bg-card/60 backdrop-blur-md">
+        <Card className="border-border/40 bg-card/60 backdrop-blur-md lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Globe className="h-4 w-4 text-primary" />
               公开首页
             </CardTitle>
             <CardDescription>
-              开启后未登录访问根路径会展示面板功能介绍和登录/注册入口；关闭后直接进入登录页。
+              开启后未登录访问根路径会展示首页；可使用默认介绍页，也可粘贴自己的 H5/HTML 首页代码。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border border-border/40 bg-muted/20 p-3">
-              <div>
-                <p className="text-sm font-medium">启用公开首页</p>
-                <p className="text-xs text-muted-foreground">适合需要开放注册或展示服务能力的面板。</p>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-muted/20 p-3">
+                <div>
+                  <p className="text-sm font-medium">启用公开首页</p>
+                  <p className="text-xs text-muted-foreground">关闭后未登录访问根路径会直接进入登录页。</p>
+                </div>
+                <Switch checked={homepageEnabled} onCheckedChange={setHomepageEnabled} />
               </div>
-              <Switch checked={homepageEnabled} onCheckedChange={setHomepageEnabled} />
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-muted/20 p-3">
+                <div>
+                  <p className="text-sm font-medium">使用自定义 H5</p>
+                  <p className="text-xs text-muted-foreground">开启后优先展示下方导入的 HTML 页面。</p>
+                </div>
+                <Switch checked={homepageCustomEnabled} onCheckedChange={setHomepageCustomEnabled} />
+              </div>
             </div>
-            <Button variant="outline" onClick={handleSaveHomepage} disabled={updateSettingsMutation.isPending}>
-              {updateSettingsMutation.isPending ? "保存中..." : "保存首页开关"}
-            </Button>
+            <div className="space-y-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <Label className="text-sm font-medium">首页 H5/HTML 代码</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    可以粘贴完整 HTML，也可以只粘贴 body 内容。预览会在独立页面中打开。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={handleUseHomepageTemplate}>
+                    使用示例
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handlePreviewHomepage} className="gap-2">
+                    <Eye className="h-4 w-4" />
+                    预览
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href="/homepage-preview" target="_blank" rel="noopener noreferrer">
+                      查看已保存
+                    </a>
+                  </Button>
+                </div>
+              </div>
+              <Textarea
+                value={homepageHtml}
+                onChange={(e) => setHomepageHtml(e.target.value)}
+                placeholder="粘贴你的首页 H5/HTML 代码"
+                className="min-h-72 font-mono text-xs leading-5"
+              />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  当前 {homepageHtml.length.toLocaleString()} / 60,000 字符。自定义代码会在沙箱 iframe 中渲染。
+                </p>
+                <Button variant="outline" onClick={handleSaveHomepage} disabled={updateSettingsMutation.isPending}>
+                  {updateSettingsMutation.isPending ? "保存中..." : "保存首页设置"}
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 

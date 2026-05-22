@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.2.53] - 2026-05-22
+
+### Added
+
+- Added custom public homepage H5/HTML settings with draft preview and saved preview.
+- Added a Telegram bot jump button in the bound Telegram dialog.
+- Added Telegram admin user renewal with a required confirmation step before extending expiry by one month.
+- Added a guided Telegram binding flow for unbound chats, with a 10-minute binding-code session.
+- Added announcement content preview with plain text, Markdown, and H5/HTML rendering support.
+
+### Changed
+
+- The sidebar user area now shows a compact account menu entry to avoid duplicated account details.
+- Telegram bot menus no longer show the panel-login button, and unbinding now requires confirmation.
+- Announcement editing no longer uses shortcut formatting buttons; admins can enter plain text, Markdown, or H5/HTML directly.
+- Improved the user-management forward-access column so the switch and status stay readable in narrow browser windows.
+- Bumped panel version to 2.2.53. Agent version remains 2.2.45.
+
 ## [2.2.52] - 2026-05-22
 
 ### Added
