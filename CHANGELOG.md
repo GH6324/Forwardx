@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.63] - 2026-05-24
+
+### Fixed
+
+- Bumped the Agent upgrade target to 2.2.47 so panels can detect and deploy the tunnel protocol blocking Agent update from Agent 2.2.46.
+
+### Changed
+
+- Bumped panel version to 2.2.63. Agent target version is 2.2.47.
+
 ## [2.2.62] - 2026-05-24
 
 ### Added
