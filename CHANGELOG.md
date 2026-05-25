@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.03] - 2026-05-25
+
+### Added
+
+- Added a sidebar footer update notice that appears above the account menu when the panel detects a new version.
+- Added inline upgrade progress, success, restart, and failure states to the same sidebar notice after an upgrade starts.
+
+### Changed
+
+- Throttled automatic panel update checks to at most once every 10 minutes.
+- Bumped panel version to 2.3.03. Agent version remains 2.2.49.
+
 ## [2.3.02] - 2026-05-25
 
 ### Fixed

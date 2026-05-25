@@ -1,6 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   DropdownMenu,
@@ -183,7 +182,7 @@ function DashboardLayoutContent({
   );
   const { data: updateInfo } = trpc.system.checkUpdate.useQuery(undefined, {
     enabled: isAdmin,
-    refetchInterval: 30 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
   });
@@ -213,7 +212,7 @@ function DashboardLayoutContent({
   const [upgradeRefreshScheduled, setUpgradeRefreshScheduled] = useState(false);
   const [telegramBind, setTelegramBind] = useState<any | null>(null);
   const { data: upgradeStatus, refetch: refetchUpgradeStatus } = trpc.system.upgradeStatus.useQuery(undefined, {
-    enabled: isAdmin && showUpgradeDialog,
+    enabled: isAdmin,
     refetchInterval: (query) => {
       const status = (query.state.data as any)?.job?.status;
       return status === "running" ? 2000 : false;
@@ -235,7 +234,6 @@ function DashboardLayoutContent({
   }, [popupAnnouncement?.id]);
 
   useEffect(() => {
-    if (!showUpgradeDialog) return;
     if (upgradeStatus?.job?.status !== "success") return;
     if (upgradeRefreshScheduled) return;
     setUpgradeRefreshScheduled(true);
@@ -243,7 +241,7 @@ function DashboardLayoutContent({
       window.location.reload();
     }, 3500);
     return () => window.clearTimeout(timer);
-  }, [showUpgradeDialog, upgradeRefreshScheduled, upgradeStatus?.job?.status]);
+  }, [upgradeRefreshScheduled, upgradeStatus?.job?.status]);
 
   const dismissAnnouncement = trpc.announcements.dismiss.useMutation({
     onSuccess: () => {
@@ -397,6 +395,16 @@ function DashboardLayoutContent({
     : [...visibleMainMenuItems, ...userStoreMenuItems, announcementsMenuItem];
 
   const activeMenuItem = allMenuItems.find((item) => item.path === location);
+  const upgradeJob = upgradeStatus?.job;
+  const upgradeProgress = getLayoutUpgradeProgress(upgradeJob);
+  const upgradeTargetVersion = updateInfo?.latestVersion || upgradeStatus?.update?.latestVersion || upgradeJob?.targetVersion || "";
+  const hasPanelUpdate = isAdmin && !!updateInfo?.hasUpdate && !!upgradeTargetVersion;
+  const showUpgradeNotice = isAdmin && (
+    hasPanelUpdate ||
+    upgradeJob?.status === "running" ||
+    upgradeJob?.status === "success" ||
+    upgradeJob?.status === "error"
+  );
 
   return (
     <>
@@ -525,6 +533,60 @@ function DashboardLayoutContent({
         </SidebarContent>
 
         <SidebarFooter className="p-3">
+          {showUpgradeNotice && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowUpgradeDialog(true);
+                refetchUpgradeStatus();
+              }}
+              className="w-full rounded-lg border border-primary/20 bg-primary/10 px-3 py-2.5 text-left text-primary shadow-sm transition-colors hover:bg-primary/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:py-0"
+              title={
+                upgradeJob?.status === "running"
+                  ? upgradeProgress.label
+                  : upgradeJob?.status === "success"
+                    ? "升级完成，系统正在重启"
+                    : upgradeJob?.status === "error"
+                      ? "升级失败"
+                      : `发现新版本 ${upgradeTargetVersion}`
+              }
+            >
+              <div className="flex items-center gap-2">
+                {upgradeJob?.status === "running" ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : upgradeJob?.status === "success" ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                ) : upgradeJob?.status === "error" ? (
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                ) : (
+                  <Rocket className="h-4 w-4 shrink-0" />
+                )}
+                <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+                  <p className="truncate text-xs font-semibold">
+                    {upgradeJob?.status === "running"
+                      ? "正在升级"
+                      : upgradeJob?.status === "success"
+                        ? "升级完成，正在重启"
+                        : upgradeJob?.status === "error"
+                          ? "升级失败"
+                          : "发现新版本"}
+                  </p>
+                  <p className="mt-1 truncate text-[11px] text-primary/75">
+                    {upgradeJob?.status === "running"
+                      ? upgradeProgress.label
+                      : upgradeJob?.status === "success"
+                        ? "系统重启后将自动刷新"
+                        : upgradeJob?.status === "error"
+                          ? (upgradeJob.error || "点击查看详情")
+                          : `可升级到 ${upgradeTargetVersion}`}
+                  </p>
+                  {upgradeJob?.status === "running" && (
+                    <Progress value={upgradeProgress.percent} className="mt-2 h-1" />
+                  )}
+                </div>
+              </div>
+            </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -554,18 +616,6 @@ function DashboardLayoutContent({
                 </div>
               </div>
               <DropdownMenuSeparator />
-              {isAdmin && updateInfo?.hasUpdate && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    setShowUpgradeDialog(true);
-                    refetchUpgradeStatus();
-                  }}
-                  className="cursor-pointer text-primary focus:text-primary"
-                >
-                  <Rocket className="mr-2 h-4 w-4" />
-                  <span>发现新版本 {updateInfo.latestVersion}</span>
-                </DropdownMenuItem>
-              )}
               <DropdownMenuItem
                 onClick={() => setShowChangePassword(true)}
                 className="cursor-pointer"
@@ -639,6 +689,15 @@ function DashboardLayoutContent({
             >
               联系TG
             </a>
+            <span className="text-muted-foreground/45">|</span>
+            <a
+              href="https://t.me/ForwardX_panel"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors hover:text-foreground"
+            >
+              TG群组
+            </a>
           </div>
         </footer>
       </SidebarInset>
@@ -653,12 +712,12 @@ function DashboardLayoutContent({
             升级会在后台执行，过程中面板可能短暂不可用，完成后会自动重启并刷新页面。
           </DialogDescription>
           {(() => {
-            const job = upgradeStatus?.job;
-            const progress = getLayoutUpgradeProgress(job);
+            const job = upgradeJob;
+            const progress = upgradeProgress;
             const isRunning = job?.status === "running";
             const isSuccess = job?.status === "success";
             const isError = job?.status === "error";
-            const targetVersion = updateInfo?.latestVersion || upgradeStatus?.update?.latestVersion || job?.targetVersion || "-";
+            const targetVersion = upgradeTargetVersion || "-";
             const currentVersion = upgradeStatus?.currentVersion || updateInfo?.currentVersion || "-";
             const logs = (job?.logs || []).slice(-24).join("\n");
             return (
@@ -735,12 +794,13 @@ function DashboardLayoutContent({
             <Button
               className="gap-2"
               disabled={
-                !updateInfo?.latestVersion ||
+                !upgradeTargetVersion ||
                 upgradeStatus?.upgradeEnabled === false ||
                 upgradeStatus?.job?.status === "running" ||
+                upgradeStatus?.job?.status === "success" ||
                 startUpgradeMutation.isPending
               }
-              onClick={() => updateInfo?.latestVersion && startUpgradeMutation.mutate({ targetVersion: updateInfo.latestVersion })}
+              onClick={() => upgradeTargetVersion && startUpgradeMutation.mutate({ targetVersion: upgradeTargetVersion })}
             >
               {startUpgradeMutation.isPending || upgradeStatus?.job?.status === "running" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
