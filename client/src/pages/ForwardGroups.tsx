@@ -62,8 +62,8 @@ type GroupForm = {
   groupType: GroupType;
   domain: string;
   recordType: "A" | "AAAA" | "CNAME";
-  failoverSeconds: number;
-  recoverSeconds: number;
+  failoverSeconds: string;
+  recoverSeconds: string;
   autoFailback: boolean;
   isEnabled: boolean;
   members: MemberForm[];
@@ -74,8 +74,8 @@ const makeDefaultForm = (): GroupForm => ({
   groupType: "host",
   domain: "",
   recordType: "A",
-  failoverSeconds: 60,
-  recoverSeconds: 120,
+  failoverSeconds: "60",
+  recoverSeconds: "120",
   autoFailback: true,
   isEnabled: true,
   members: [],
@@ -116,8 +116,8 @@ function ForwardGroupsContent() {
       groupType: group.groupType === "tunnel" ? "tunnel" : "host",
       domain: group.domain || "",
       recordType: group.recordType || "A",
-      failoverSeconds: Number(group.failoverSeconds || 60),
-      recoverSeconds: Number(group.recoverSeconds || 120),
+      failoverSeconds: String(Number(group.failoverSeconds || 60)),
+      recoverSeconds: String(Number(group.recoverSeconds || 120)),
       autoFailback: !!group.autoFailback,
       isEnabled: !!group.isEnabled,
       members: (group.members || []).map((member: any) => ({
@@ -228,10 +228,20 @@ function ForwardGroupsContent() {
   const handleSubmit = () => {
     if (!form.name.trim()) return toast.error("请填写组名称");
     if (form.members.length === 0) return toast.error("请至少添加一个成员");
+    const failoverSeconds = Number(form.failoverSeconds);
+    const recoverSeconds = Number(form.recoverSeconds);
+    if (!Number.isInteger(failoverSeconds) || failoverSeconds < 10 || failoverSeconds > 3600) {
+      return toast.error("故障转移时间需为 10-3600 秒的整数");
+    }
+    if (!Number.isInteger(recoverSeconds) || recoverSeconds < 10 || recoverSeconds > 3600) {
+      return toast.error("恢复观察时间需为 10-3600 秒的整数");
+    }
     const payload = {
       ...form,
       name: form.name.trim(),
       domain: form.domain.trim() || null,
+      failoverSeconds,
+      recoverSeconds,
       members: form.members.map((member, index) => ({
         memberType: member.memberType,
         hostId: member.hostId,
@@ -436,24 +446,41 @@ function ForwardGroupsContent() {
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label>故障转移时间</Label>
-                <Input type="number" min={10} max={3600} value={form.failoverSeconds} onChange={(e) => setForm({ ...form, failoverSeconds: Number(e.target.value) || 60 })} />
-              </div>
-              <div className="space-y-2">
-                <Label>恢复观察时间</Label>
-                <Input type="number" min={10} max={3600} value={form.recoverSeconds} onChange={(e) => setForm({ ...form, recoverSeconds: Number(e.target.value) || 120 })} />
-              </div>
-              <div className="flex items-end gap-4">
-                <label className="flex h-10 flex-1 items-center justify-between rounded-md border border-border/60 px-3">
-                  <span className="text-sm">恢复后切回</span>
-                  <Switch checked={form.autoFailback} onCheckedChange={(autoFailback) => setForm({ ...form, autoFailback })} />
-                </label>
-                <label className="flex h-10 flex-1 items-center justify-between rounded-md border border-border/60 px-3">
-                  <span className="text-sm">启用</span>
-                  <Switch checked={form.isEnabled} onCheckedChange={(isEnabled) => setForm({ ...form, isEnabled })} />
-                </label>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">时间单位：秒，允许范围 10-3600。</p>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>故障转移时间</Label>
+                  <Input
+                    type="number"
+                    min={10}
+                    max={3600}
+                    value={form.failoverSeconds}
+                    onChange={(e) => setForm({ ...form, failoverSeconds: e.target.value })}
+                    placeholder="60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>恢复观察时间</Label>
+                  <Input
+                    type="number"
+                    min={10}
+                    max={3600}
+                    value={form.recoverSeconds}
+                    onChange={(e) => setForm({ ...form, recoverSeconds: e.target.value })}
+                    placeholder="120"
+                  />
+                </div>
+                <div className="flex items-end gap-4">
+                  <label className="flex h-10 flex-1 items-center justify-between rounded-md border border-border/60 px-3">
+                    <span className="text-sm">恢复后切回</span>
+                    <Switch checked={form.autoFailback} onCheckedChange={(autoFailback) => setForm({ ...form, autoFailback })} />
+                  </label>
+                  <label className="flex h-10 flex-1 items-center justify-between rounded-md border border-border/60 px-3">
+                    <span className="text-sm">启用</span>
+                    <Switch checked={form.isEnabled} onCheckedChange={(isEnabled) => setForm({ ...form, isEnabled })} />
+                  </label>
+                </div>
               </div>
             </div>
 

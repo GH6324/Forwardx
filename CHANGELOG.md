@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.3.02] - 2026-05-25
+
+### Fixed
+
+- Fixed forwarding group failover and recovery time inputs so values can be cleared and edited without immediately resetting to defaults.
+- Added seconds-unit guidance for forwarding group timing fields.
+
+### Changed
+
+- Bumped panel version to 2.3.02. Agent version remains 2.2.49.
+
 ## [2.3.01] - 2026-05-25
 
 ### Added
