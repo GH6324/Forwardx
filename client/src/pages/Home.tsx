@@ -1,9 +1,11 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
+import MobileAppSettings from "@/components/MobileAppSettings";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { mobileAuth } from "@/lib/mobileAuth";
 import { trpc } from "@/lib/trpc";
 import { FORWARD_TYPE_LABELS } from "@shared/forwardTypes";
 import {
@@ -228,6 +230,15 @@ function DashboardContent() {
     });
   }, [subscriptions]);
 
+  const mobileReminderSnapshot = useMemo(
+    () => ({
+      trafficLimit,
+      trafficUsed,
+      expiresAt: activeSubscription?.expiresAt || currentUserTraffic?.expiresAt || null,
+    }),
+    [trafficLimit, trafficUsed, activeSubscription?.expiresAt, currentUserTraffic?.expiresAt],
+  );
+
   const onlineRate = stats?.totalHosts ? Math.round((stats.onlineHosts / stats.totalHosts) * 100) : 0;
   const activeRate = stats?.totalRules ? Math.round((stats.activeRules / stats.totalRules) * 100) : 0;
   const recentHosts = hosts.slice(0, 5);
@@ -326,6 +337,8 @@ function DashboardContent() {
           />
         </div>
       )}
+
+      <MobileAppSettings snapshot={mobileReminderSnapshot} />
 
       {!isAdmin && (
         <Card className="relative overflow-hidden border-border/40 bg-card/60 backdrop-blur-md">
@@ -649,6 +662,10 @@ export default function Home() {
   if (loading || settingsLoading) return null;
 
   if (!user) {
+    if (mobileAuth.isNative) {
+      if (typeof window !== "undefined") window.location.href = "/login";
+      return null;
+    }
     if (settings?.homepageEnabled !== false) {
       if (settings?.homepageCustomEnabled && settings?.homepageHtml?.trim()) {
         return <CustomPublicHome html={settings.homepageHtml} />;

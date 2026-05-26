@@ -45,6 +45,32 @@ function serveStatic(app: express.Express) {
   });
 }
 
+function installMobileCors(app: express.Express) {
+  const allowedOrigins = new Set([
+    "capacitor://localhost",
+    "ionic://localhost",
+    "http://localhost",
+    "https://localhost",
+  ]);
+
+  app.use((req, res, next) => {
+    const origin = String(req.headers.origin || "");
+    const allowed = allowedOrigins.has(origin) || /^https?:\/\/localhost:\d+$/i.test(origin);
+    if (allowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,x-forwardx-mobile,trpc-accept,x-trpc-source");
+      res.setHeader("Vary", "Origin");
+    }
+    if (req.method === "OPTIONS" && allowed) {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+}
+
 async function startServer() {
   await initDatabase();
 
@@ -56,6 +82,7 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
+  installMobileCors(app);
   app.use(agentRouter);
   app.use(migrationRouter);
   app.use(

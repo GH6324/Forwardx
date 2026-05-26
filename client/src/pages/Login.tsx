@@ -8,6 +8,7 @@ import { Eye, EyeOff, Loader2, Sun, Moon, RefreshCw, UserPlus, LogIn, Send } fro
 import { toast } from "sonner";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocation } from "wouter";
+import { mobileAuth } from "@/lib/mobileAuth";
 
 const REGISTRATION_CLOSED_MESSAGE = "当前注册未开放，请联系管理员";
 
@@ -57,8 +58,8 @@ export default function Login() {
   const [location] = useLocation();
   const initialMode = new URLSearchParams(location.split("?")[1] || "").get("mode") === "register" ? "register" : "login";
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState(() => mobileAuth.getUsername());
+  const [password, setPassword] = useState(() => mobileAuth.getPassword());
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -67,6 +68,7 @@ export default function Login() {
   const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [showCaptcha, setShowCaptcha] = useState(false);
   const [telegramLoginCode, setTelegramLoginCode] = useState<string | null>(null);
+  const [panelUrl, setPanelUrl] = useState(() => mobileAuth.getPanelUrl());
   const telegramWidgetRef = useRef<HTMLDivElement | null>(null);
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -104,7 +106,12 @@ export default function Login() {
 
   // 登录 mutation
   const loginMutation = trpc.auth.login.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (mobileAuth.isNative) {
+        mobileAuth.setPanelUrl(panelUrl);
+        mobileAuth.setCredentials(username, password);
+        mobileAuth.setToken(data.mobileToken);
+      }
       toast.success("登录成功");
       utils.auth.me.invalidate();
       window.location.href = "/";
@@ -214,6 +221,14 @@ export default function Login() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (mobileAuth.isNative) {
+      const normalizedPanelUrl = panelUrl.trim().replace(/\/+$/, "");
+      if (!/^https?:\/\/.+/i.test(normalizedPanelUrl)) {
+        toast.error("请输入完整面板地址，例如 https://panel.example.com");
+        return;
+      }
+      mobileAuth.setPanelUrl(normalizedPanelUrl);
+    }
     if (!username.trim() || !password.trim()) {
       toast.error("请输入用户名和密码");
       return;
@@ -228,9 +243,10 @@ export default function Login() {
         password,
         captchaId: captchaQuery.data?.captchaId,
         captchaAnswer: parseInt(captchaAnswer.trim(), 10),
+        mobile: mobileAuth.isNative,
       });
     } else {
-      loginMutation.mutate({ username: username.trim(), password });
+      loginMutation.mutate({ username: username.trim(), password, mobile: mobileAuth.isNative });
     }
   };
 
@@ -294,7 +310,7 @@ export default function Login() {
   const isTelegramPending = telegramLoginMutation.isPending || telegramWidgetLoginMutation.isPending;
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background relative px-3 sm:px-4">
+    <div className="mobile-login-screen flex items-center justify-center min-h-screen bg-background relative px-3 sm:px-4">
       {/* Theme toggle */}
       <button
         onClick={toggleTheme}
@@ -331,6 +347,21 @@ export default function Login() {
             </div>
           ) : mode === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4">
+              {mobileAuth.isNative && (
+                <div className="space-y-2">
+                  <Label htmlFor="panel-url">面板地址</Label>
+                  <Input
+                    id="panel-url"
+                    type="url"
+                    placeholder="https://panel.example.com"
+                    value={panelUrl}
+                    onChange={(e) => setPanelUrl(e.target.value)}
+                    autoComplete="url"
+                    autoFocus
+                    disabled={isPending}
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="username">用户名</Label>
                 <Input
@@ -340,7 +371,7 @@ export default function Login() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   autoComplete="username"
-                  autoFocus
+                  autoFocus={!mobileAuth.isNative}
                   disabled={isPending}
                 />
               </div>

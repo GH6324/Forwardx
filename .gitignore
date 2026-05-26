@@ -52,3 +52,10 @@ agent/forwardx-agent-*
 agent/*.exe
 forwardx-fxp/dist/
 forwardx-fxp/forwardx-fxp*
+
+# Android local build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/

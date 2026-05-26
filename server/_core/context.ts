@@ -16,7 +16,9 @@ export async function createContext({ req, res }: CreateExpressContextOptions): 
   let user: User | null = null;
 
   try {
-    const token = req.cookies?.[COOKIE_NAME];
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : "";
+    const token = bearerToken || req.cookies?.[COOKIE_NAME];
     if (token && ENV.cookieSecret) {
       const payload = jwt.verify(token, ENV.cookieSecret) as { userId: number };
       if (payload?.userId) {

@@ -3,6 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/_core/hooks/useAuth";
 import type { ComponentType } from "react";
 import { trpc } from "@/lib/trpc";
+import { mobileAuth } from "@/lib/mobileAuth";
 import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import { Redirect, Route, Switch, useLocation } from "wouter";
@@ -62,11 +63,18 @@ function Router() {
 }
 
 function SetupGate() {
+  const [location] = useLocation();
+  const hasMobilePanelUrl = !mobileAuth.isNative || !!mobileAuth.getPanelUrl();
   const setup = trpc.setup.status.useQuery(undefined, {
+    enabled: hasMobilePanelUrl,
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const [location] = useLocation();
+
+  if (!hasMobilePanelUrl) {
+    if (location !== "/login") return <Redirect to="/login" />;
+    return <Router />;
+  }
 
   if (setup.isLoading) return null;
 

@@ -200,6 +200,7 @@ export const authRouter = router({
       password: z.string().min(1, "请输入密码"),
       captchaId: z.string().optional(),
       captchaAnswer: z.number().optional(),
+      mobile: z.boolean().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "unknown";
@@ -230,7 +231,7 @@ export const authRouter = router({
       ctx.res.cookie(COOKIE_NAME, token, getSessionCookieOptions(ctx.req));
       console.info(`[Auth] Login success userId=${user.id} username=${maskIdentifier(user.username)} ip=${ip}`);
       const { password, ...safeUser } = user;
-      return safeUser;
+      return { ...safeUser, mobileToken: input.mobile ? token : null };
     }),
 
   register: publicProcedure

@@ -132,6 +132,32 @@
       linear-gradient(135deg, color-mix(in oklch, var(--background) 90%, white 10%) 0%, var(--background) 48%, color-mix(in oklch, var(--background) 88%, var(--chart-4) 12%) 100%);
     min-height: 100vh;
   }
+
+  html.capacitor-native,
+  html.capacitor-native body,
+  html.capacitor-native #root {
+    min-height: 100dvh;
+    overscroll-behavior: none;
+  }
+
+  html.capacitor-native body {
+    background: var(--background);
+  }
+
+  html.capacitor-native [data-mobile-header="true"] {
+    min-height: calc(3.5rem + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  html.capacitor-native [data-mobile-main="true"] {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+
+  html.capacitor-native .mobile-login-screen {
+    min-height: 100dvh;
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   [type="button"]:not(:disabled),

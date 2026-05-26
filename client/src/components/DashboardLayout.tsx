@@ -645,7 +645,7 @@ function DashboardLayoutContent({
 
       <SidebarInset>
         {isMobile && (
-          <div className="glass-surface flex border-b h-14 items-center justify-between px-2 sticky top-0 z-40">
+          <div data-mobile-header="true" className="glass-surface flex border-b h-14 items-center justify-between px-2 sticky top-0 z-40">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
               <div className="flex items-center gap-3">
@@ -669,7 +669,7 @@ function DashboardLayoutContent({
             </button>
           </div>
         )}
-        <main className="flex-1 p-3 sm:p-6">{children}</main>
+        <main data-mobile-main="true" className="flex-1 p-3 sm:p-6">{children}</main>
         <footer className="pb-4 text-center text-xs text-muted-foreground">
           <div className="inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
             <a

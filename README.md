@@ -4,7 +4,7 @@
 
 ForwardX 是一个面向 Linux 多主机环境的转发与隧道编排平台。它通过 Agent 管理主机、隧道、转发规则、转发组、用户权限和流量数据，适合把多台服务器统一组织成可观测、可切换、可授权的网络入口。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.3.05-brightgreen.svg)](https://github.com/poouo/Forwardx/releases)
 [![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
@@ -263,6 +263,22 @@ pnpm build
 pnpm check:versions
 ```
 
+## Android APK
+
+ForwardX Android 客户端基于 Capacitor 复用当前 React 面板，并通过移动端 Token 访问后端：
+
+- APK 登录页需要同时填写面板地址、账号和密码，配置会保存在本机；退出登录后会清除登录态，重新打开时保留配置供用户修改。
+- Android 端未登录时不会展示网页主页，会直接进入登录页；登录成功后直接进入后台仪表盘。
+- Android 端支持流量到期通知、套餐到期通知和 APK 更新检查；通知开关默认关闭。
+- 本地没有 Android SDK 时，可通过 GitHub Actions 的 `Android APK` workflow 构建。推送 `v*.*.*` 标签时，APK 会自动上传到 GitHub Release；也可以手动触发 workflow 后从 artifact 下载。
+
+常用命令：
+
+```bash
+pnpm mobile:sync
+pnpm mobile:apk
+```
+
 ## 安全建议
 
 - 使用强密码注册管理员账户。
@@ -276,7 +292,7 @@ pnpm check:versions
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).
 
 ## Star 趋势
 
